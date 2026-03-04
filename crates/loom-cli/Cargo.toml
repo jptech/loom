@@ -13,3 +13,10 @@ loom-vivado = { path = "../loom-vivado" }
 clap.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
+colored.workspace = true
+indicatif.workspace = true
+quick-xml.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

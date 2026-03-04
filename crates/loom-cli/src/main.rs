@@ -1,6 +1,7 @@
 use std::process;
 
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 
 mod backend_registry;
 mod commands;
@@ -44,8 +45,19 @@ pub enum Commands {
     #[command(subcommand)]
     Env(commands::env::EnvCommands),
 
+    /// IP management
+    #[command(subcommand)]
+    Ip(commands::ip::IpCommands),
+
     /// Validate manifests without building
     Lint(commands::lint::LintArgs),
+
+    /// Export LSP configuration
+    Lsp(commands::lsp::LspArgs),
+
+    /// Migration utilities
+    #[command(subcommand)]
+    Migrate(commands::migrate::MigrateCommands),
 
     /// Show last build report
     Report(commands::report::ReportArgs),
@@ -61,6 +73,10 @@ pub struct GlobalContext {
 fn main() {
     let cli = Cli::parse();
 
+    if cli.no_color {
+        colored::control::set_override(false);
+    }
+
     let ctx = GlobalContext {
         verbose: cli.verbose,
         quiet: cli.quiet,
@@ -73,7 +89,10 @@ fn main() {
         Commands::Clean(args) => commands::clean::run(args, &ctx),
         Commands::Deps(cmd) => commands::deps::run(cmd, &ctx),
         Commands::Env(cmd) => commands::env::run(cmd, &ctx),
+        Commands::Ip(cmd) => commands::ip::run(cmd, &ctx),
         Commands::Lint(args) => commands::lint::run(args, &ctx),
+        Commands::Lsp(args) => commands::lsp::run(args, &ctx),
+        Commands::Migrate(cmd) => commands::migrate::run(cmd, &ctx),
         Commands::Report(args) => commands::report::run(args, &ctx),
     };
 
@@ -103,7 +122,11 @@ fn display_error(err: &loom_core::error::LoomError, ctx: &GlobalContext) {
             3 => "Environment error",
             _ => "Error",
         };
-        eprintln!("error[E{}]: {}", err.exit_code(), prefix);
+        eprintln!(
+            "{} {}",
+            format!("error[E{}]:", err.exit_code()).red().bold(),
+            prefix.red()
+        );
         eprintln!("  {}", err);
     }
 }

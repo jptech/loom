@@ -2,5 +2,8 @@ pub mod build;
 pub mod clean;
 pub mod deps;
 pub mod env;
+pub mod ip;
 pub mod lint;
+pub mod lsp;
+pub mod migrate;
 pub mod report;

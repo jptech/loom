@@ -1,4 +1,5 @@
 use clap::Args;
+use colored::Colorize;
 
 use loom_core::assemble::assemble_filesets;
 use loom_core::build::checkpoint::{load_build_state, save_build_state, BuildState};
@@ -57,7 +58,7 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
 
     // -- RESOLVE --
     if !ctx.quiet {
-        eprintln!("  Resolving workspace...");
+        eprintln!("  {} Resolving workspace...", "RESOLVE".bold());
     }
 
     let (workspace_root, ws_manifest) = find_workspace_root(&cwd)?;
@@ -124,7 +125,7 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
 
     // -- ASSEMBLE --
     if !ctx.quiet {
-        eprintln!("  Assembling file-set...");
+        eprintln!("  {} Assembling file-set...", "ASSEMBLE".bold());
     }
     let filesets = assemble_filesets(&resolved)?;
 
@@ -138,7 +139,7 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
 
     // -- VALIDATE --
     if !ctx.quiet {
-        eprintln!("  Validating...");
+        eprintln!("  {} Validating...", "VALIDATE".bold());
     }
 
     let build_context = BuildContext::new(resolved.clone(), workspace_root.clone());
@@ -153,7 +154,7 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
 
     if validation.has_errors() {
         for diag in validation.errors() {
-            eprintln!("  error: {}", diag.message);
+            eprintln!("  {} {}", "error:".red().bold(), diag.message);
             if let Some(path) = &diag.source_path {
                 eprintln!("    at: {}", path.display());
             }
@@ -164,7 +165,7 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     }
 
     for diag in validation.warnings() {
-        eprintln!("  warning: {}", diag.message);
+        eprintln!("  {} {}", "warning:".yellow().bold(), diag.message);
     }
 
     // -- DRY RUN --
@@ -321,7 +322,7 @@ fn handle_build_result(
 
     if build_result.success {
         if !ctx.quiet {
-            eprintln!("  Build PASSED.");
+            eprintln!("  {}", "Build PASSED.".green().bold());
             if let Some(bit) = &build_result.bitstream_path {
                 eprintln!("  Bitstream: {}", bit.display());
             }
