@@ -229,15 +229,15 @@ mod tests {
             })
         }
 
-        fn validate(&self, _p: &_, _f: &_, _c: &_) -> Result<Vec<Diagnostic>, LoomError> {
+        fn validate(&self, _p: &ResolvedProject, _f: &AssembledFilesets, _c: &BuildContext) -> Result<Vec<Diagnostic>, LoomError> {
             Ok(vec![])
         }
 
-        fn generate_build_scripts(&self, _p: &_, _f: &_, _c: &_) -> Result<Vec<PathBuf>, LoomError> {
+        fn generate_build_scripts(&self, _p: &ResolvedProject, _f: &AssembledFilesets, _c: &BuildContext) -> Result<Vec<PathBuf>, LoomError> {
             Ok(vec![])
         }
 
-        fn execute_build(&self, _s: &_, _c: &_) -> Result<BuildResult, LoomError> {
+        fn execute_build(&self, _s: &[PathBuf], _c: &BuildContext) -> Result<BuildResult, LoomError> {
             unimplemented!()
         }
     }

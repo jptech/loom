@@ -14,6 +14,53 @@
 - No `--resume`, `--stop-after`, `--dry-run`
 - `-j` flag parsed but ignored
 
+## Pipeline Integration Map
+
+How the tasks connect at runtime (Phase 1 `loom build` flow):
+
+```
+CLI (Task 14-15)
+│
+├─ find_workspace_root(&cwd)                          [Task 04]
+├─ discover_members(&root, &ws_manifest)              [Task 04]
+├─ load_all_components(&members)                      [Task 04]
+├─ find_project(&members, name)                       [Task 04]
+│
+├─ Phase 1: RESOLVE
+│  ├─ WorkspaceDependencySource::new(components)      [Task 05]
+│  ├─ resolve_project(manifest, root, ws_root, &src)  [Task 05]
+│  ├─ load_lockfile(&workspace_root)                  [Task 06]
+│  ├─ if None → generate_lockfile + write_lockfile    [Task 06]
+│  └─ if Some → check_staleness → Valid or Stale      [Task 06]
+│
+├─ Phase 2: GENERATE — skipped (Phase 1)
+│
+├─ Phase 3: ASSEMBLE
+│  └─ assemble_filesets(&resolved)                    [Task 07]
+│
+├─ Phase 4: VALIDATE
+│  ├─ get_backend(target.backend)                     [Task 15]
+│  ├─ BuildContext::new(resolved, ws_root)             [Task 08]
+│  └─ validate_pre_build(&resolved, &fs, &ctx, &be)  [Task 09]
+│
+├─ Phase 5: BUILD
+│  ├─ backend.generate_build_scripts(...)             [Task 10]
+│  └─ backend.execute_build(scripts, &ctx)            [Task 11]
+│
+└─ Phase 6-7: EXTRACT + REPORT — minimal (Phase 1)
+   └─ return success/failure + bitstream path
+```
+
+**Key module responsibilities:**
+- `manifest/` — TOML parsing and validation (Tasks 02-03)
+- `resolve/workspace.rs` — workspace discovery and member classification (Task 04)
+- `resolve/resolver.rs` — dependency resolution, `DependencySource` trait (Task 05)
+- `resolve/lockfile.rs` — lockfile generation, staleness detection (Task 06)
+- `assemble/fileset.rs` — collect and order files from resolved deps (Task 07)
+- `plugin/backend.rs` — `BackendPlugin` trait, `BuildContext`, diagnostics (Task 08)
+- `build/validate.rs` — pre-build checks using backend + filesets (Task 09)
+- `error.rs` — `LoomError` enum with exit code mapping (Task 13)
+
 ## Task Execution Order
 
 Tasks must be completed in this order (each depends on the previous):
@@ -48,14 +95,14 @@ lib/
   axi_common/
     component.toml
     rtl/
-      axi_pkg.sv      (empty placeholder)
+      axi_pkg.sv
 projects/
   my_design/
     project.toml
     src/
-      top.sv          (empty placeholder)
+      top.sv
     constraints/
-      timing.xdc      (empty placeholder)
+      timing.xdc
 ```
 
 `workspace.toml`:
@@ -73,6 +120,18 @@ version = "1.0.0"
 
 [filesets.synth]
 files = ["rtl/axi_pkg.sv"]
+```
+
+`lib/axi_common/rtl/axi_pkg.sv`:
+```systemverilog
+package axi_common_pkg;
+  typedef enum logic [1:0] {
+    AXI_RESP_OKAY   = 2'b00,
+    AXI_RESP_EXOKAY = 2'b01,
+    AXI_RESP_SLVERR = 2'b10,
+    AXI_RESP_DECERR = 2'b11
+  } axi_resp_t;
+endpackage
 ```
 
 `projects/my_design/project.toml`:
@@ -94,5 +153,148 @@ constraints = ["constraints/timing.xdc"]
 axi_common = ">=1.0.0"
 ```
 
+`projects/my_design/src/top.sv`:
+```systemverilog
+import axi_common_pkg::*;
+
+module top (
+  input  logic clk,
+  input  logic rst_n
+);
+  // Minimal top module for test fixture
+  logic [1:0] resp;
+  assign resp = AXI_RESP_OKAY;
+endmodule
+```
+
+`projects/my_design/constraints/timing.xdc`:
+```tcl
+create_clock -period 10.000 -name clk [get_ports clk]
+set_input_delay -clock clk 2.0 [get_ports rst_n]
+```
+
 ### `tests/fixtures/multi_component/`
-A workspace with a dependency chain: `project → comp_a → comp_b`. Used to test dependency graph ordering and circular dependency detection.
+
+A workspace with a dependency chain: `project → comp_a → comp_b`. Used to test topological sort ordering.
+
+```
+workspace.toml
+lib/
+  comp_a/
+    component.toml
+    rtl/comp_a.sv
+  comp_b/
+    component.toml
+    rtl/comp_b.sv
+projects/
+  top_project/
+    project.toml
+    src/top.sv
+    constraints/timing.xdc
+```
+
+`workspace.toml`:
+```toml
+[workspace]
+name = "multi_component_test"
+members = ["lib/*", "projects/*"]
+```
+
+`lib/comp_b/component.toml`:
+```toml
+[component]
+name = "testorg/comp_b"
+version = "1.0.0"
+
+[filesets.synth]
+files = ["rtl/comp_b.sv"]
+```
+
+`lib/comp_a/component.toml`:
+```toml
+[component]
+name = "testorg/comp_a"
+version = "1.0.0"
+
+[filesets.synth]
+files = ["rtl/comp_a.sv"]
+
+[dependencies]
+comp_b = ">=1.0.0"
+```
+
+`projects/top_project/project.toml`:
+```toml
+[project]
+name = "top_project"
+top_module = "top"
+
+[target]
+part = "xczu7ev-ffvc1156-2-e"
+backend = "vivado"
+version = "2023.2"
+
+[filesets.synth]
+files = ["src/top.sv"]
+constraints = ["constraints/timing.xdc"]
+
+[dependencies]
+comp_a = ">=1.0.0"
+```
+
+### `tests/fixtures/cycle_detection/`
+
+A workspace with a circular dependency for cycle detection testing.
+
+`lib/cycle_a/component.toml`:
+```toml
+[component]
+name = "testorg/cycle_a"
+version = "1.0.0"
+
+[filesets.synth]
+files = ["rtl/cycle_a.sv"]
+
+[dependencies]
+cycle_b = ">=1.0.0"
+```
+
+`lib/cycle_b/component.toml`:
+```toml
+[component]
+name = "testorg/cycle_b"
+version = "1.0.0"
+
+[filesets.synth]
+files = ["rtl/cycle_b.sv"]
+
+[dependencies]
+cycle_a = ">=1.0.0"
+```
+
+### Shared Test Utilities
+
+Create `crates/loom-core/tests/common/mod.rs` with helpers reusable across task tests:
+```rust
+use std::path::{Path, PathBuf};
+
+/// Path to test fixtures directory
+pub fn fixtures_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap()  // crates/
+        .parent().unwrap()  // repo root
+        .join("tests/fixtures")
+}
+
+/// Load and resolve the simple_project fixture
+pub fn load_simple_project() -> (PathBuf, loom_core::resolve::resolver::ResolvedProject) {
+    let root = fixtures_dir().join("simple_project");
+    let workspace = loom_core::manifest::load_workspace_manifest(&root.join("workspace.toml")).unwrap();
+    let members = loom_core::resolve::workspace::discover_members(&root, &workspace).unwrap();
+    let project = loom_core::resolve::workspace::find_project(&members, None).unwrap();
+    let resolved = loom_core::resolve::resolver::resolve_project(&root, &project, &members).unwrap();
+    (root, resolved)
+}
+```
+
+Use via `#[path = "../tests/common/mod.rs"] mod common;` or `mod common;` depending on test location.

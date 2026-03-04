@@ -156,6 +156,70 @@ pub mod build;
 pub mod plugin;
 ```
 
+`loom-core/src/error.rs` — Initial stub (fully populated in Task 13):
+```rust
+use std::path::PathBuf;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum LoomError {
+    // ── Available from Task 01 ──
+    #[error("I/O error at '{path}': {source}")]
+    Io { path: PathBuf, #[source] source: std::io::Error },
+
+    #[error("Internal error: {0}")]
+    Internal(String),
+
+    // ── Add during Task 02-03 ──
+    // ManifestParse { path, message }
+    // ManifestValidation { path, message }
+
+    // ── Add during Task 04 ──
+    // NoWorkspace { start }
+    // ProjectNotFound { name }
+
+    // ── Add during Task 05 ──
+    // DependencyNotFound { name, constraint }
+    // DependencyCycle { component }
+    // VersionNotSatisfied { dependency, required, found, found_in }
+    // AmbiguousDependency { name, candidates }
+    // InvalidVersion { component, version }
+    // InvalidVersionReq { dependency, constraint }
+
+    // ── Add during Task 06 ──
+    // LockfileStale { reasons }
+    // LockfileWrite { message }
+    // LockfileParse { message }
+
+    // ── Add during Task 07 ──
+    // GlobPattern { pattern, message }
+    // GlobError { message }
+
+    // ── Add during Task 09 ──
+    // ValidationFailed { error_count }
+
+    // ── Add during Task 11 ──
+    // BuildFailed { phase, log_path }
+
+    // ── Add during Task 12 ──
+    // ToolNotFound { tool, message }
+    // ToolVersionMismatch { required, found }
+}
+
+impl LoomError {
+    pub fn exit_code(&self) -> i32 {
+        // Stub: fully implemented in Task 13
+        match self {
+            LoomError::Io { .. } | LoomError::Internal(_) => 4,
+            // 1 = build failure, 2 = config error, 3 = env error
+            _ => 4,
+        }
+    }
+}
+```
+
+**As you implement each task, uncomment and add the relevant error variants.** Task 13 finalizes all variants with proper exit code mapping and actionable error messages. See [13-error-types.md](./13-error-types.md) for the complete enum.
+
 ## Done When
 
 - `cargo build --workspace` succeeds with no errors (warnings OK)

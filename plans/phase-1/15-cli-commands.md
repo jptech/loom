@@ -6,6 +6,32 @@
 ## Spec Reference
 `system_plan.md` §12.2, §15 Phase 1 Build Pipeline
 
+## Backend Dispatch
+
+The build pipeline selects a backend based on `[target].backend` in the project manifest. Phase 1 only supports `"vivado"`, but this pattern prepares for Quartus (Phase 4) and yosys (Phase 5).
+
+```rust
+// In loom-cli or loom-core, e.g. crates/loom-cli/src/backend_registry.rs
+use loom_core::plugin::backend::BackendPlugin;
+use loom_core::error::LoomError;
+
+pub fn get_backend(name: &str) -> Result<Box<dyn BackendPlugin>, LoomError> {
+    match name {
+        "vivado" => Ok(Box::new(loom_vivado::VivadoBackend)),
+        // Phase 4: "quartus" => Ok(Box::new(loom_quartus::QuartusBackend)),
+        // Phase 5: "yosys" => Ok(Box::new(loom_yosys::YosysNextpnrBackend)),
+        _ => Err(LoomError::ToolNotFound {
+            tool: name.to_string(),
+            message: format!(
+                "Unknown backend '{}'. Supported backends: vivado. \
+                 Check your project.toml [target].backend setting.",
+                name
+            ),
+        }),
+    }
+}
+```
+
 ## Commands to Implement
 
 ### 1. `loom build`
@@ -21,7 +47,7 @@ use loom_core::{
     build::{context::BuildContext, validate::validate_pre_build},
     error::LoomError,
 };
-use loom_vivado::VivadoBackend;
+use crate::backend_registry::get_backend;
 
 pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     let cwd = std::env::current_dir()
@@ -102,8 +128,11 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     if !ctx.quiet { eprintln!("  Validating..."); }
 
     let build_context = BuildContext::new(resolved.clone(), workspace_root.clone());
-    let backend = VivadoBackend;
-    let validation = validate_pre_build(&resolved, &filesets, &build_context, &backend)?;
+    let backend_name = resolved.project.target.as_ref()
+        .map(|t| t.backend.as_str())
+        .unwrap_or("vivado");
+    let backend = get_backend(backend_name)?;
+    let validation = validate_pre_build(&resolved, &filesets, &build_context, backend.as_ref())?;
 
     if validation.has_errors() {
         for diag in validation.errors() {
@@ -287,7 +316,8 @@ pub fn run(cmd: EnvCommands, ctx: &GlobalContext) -> Result<(), LoomError> {
 }
 
 fn run_check(ctx: &GlobalContext) -> Result<(), LoomError> {
-    let backend = loom_vivado::VivadoBackend;
+    // Phase 1: check all known backends. Phase 4+: configurable via args.
+    let backend = get_backend("vivado")?;
     let status = backend.check_environment(None)?;
 
     if ctx.json {
