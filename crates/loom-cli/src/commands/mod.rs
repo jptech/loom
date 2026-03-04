@@ -8,3 +8,4 @@ pub mod lsp;
 pub mod migrate;
 pub mod new;
 pub mod report;
+pub mod sim;

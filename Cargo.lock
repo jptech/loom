@@ -456,7 +456,10 @@ dependencies = [
  "indicatif",
  "loom-core",
  "loom-quartus",
+ "loom-verilator",
  "loom-vivado",
+ "loom-xsim",
+ "loom-yosys",
  "quick-xml",
  "serde_json",
  "tempfile",
@@ -498,6 +501,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "loom-verilator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "loom-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "loom-vivado"
 version = "0.1.0"
 dependencies = [
@@ -509,6 +524,31 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror",
+]
+
+[[package]]
+name = "loom-xsim"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "loom-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "loom-yosys"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "loom-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
 ]
 
 [[package]]

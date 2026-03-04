@@ -65,6 +65,9 @@ pub enum Commands {
 
     /// Show last build report
     Report(commands::report::ReportArgs),
+
+    /// Run simulation
+    Sim(commands::sim::SimArgs),
 }
 
 pub struct GlobalContext {
@@ -99,6 +102,7 @@ fn main() {
         Commands::Migrate(cmd) => commands::migrate::run(cmd, &ctx),
         Commands::New(cmd) => commands::new::run(cmd, &ctx),
         Commands::Report(args) => commands::report::run(args, &ctx),
+        Commands::Sim(args) => commands::sim::run(args, &ctx),
     };
 
     match result {

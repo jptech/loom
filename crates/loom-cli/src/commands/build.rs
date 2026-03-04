@@ -56,6 +56,14 @@ pub struct BuildArgs {
     /// Build all profile combinations
     #[arg(long)]
     pub profile_all: bool,
+
+    /// Run all declared strategies in parallel
+    #[arg(long)]
+    pub sweep: bool,
+
+    /// Reference checkpoint for incremental build
+    #[arg(long, value_name = "PATH")]
+    pub reference: Option<std::path::PathBuf>,
 }
 
 pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
