@@ -1,6 +1,89 @@
 # Loom — FPGA Build System Planning Document
 
-**Status:** Draft v6
+**Status:** Draft v7
+
+---
+
+## 0. Reading Guide for Implementation
+
+This document is the complete specification for Loom. It is designed to be consumed by AI coding agents implementing the system phase by phase. Key conventions:
+
+**Phase tags.** Sections marked `[Phase N]` in the heading indicate when that feature is implemented. Features without a tag are Phase 1 (core). When implementing a specific phase, read all sections for that phase and earlier — skip later phases.
+
+**Spec vs. rationale.** Paragraphs explaining *why* a decision was made are kept brief. Code blocks, TOML examples, interface definitions, and data structures are the primary specification — implement to match them exactly.
+
+**Section cross-references.** `§N.N` references point to other sections. Follow them when you need the full spec for a referenced concept.
+
+### 0.1 Phase Scope Matrix
+
+| Feature | Phase | Key Sections |
+|---|---|---|
+| **Manifest parsing** (component, project, workspace TOML) | 1 | §3.1, §5.1, §11.2 |
+| **Dependency resolution** (workspace-scoped) | 1 | §3.5 |
+| **Lockfile** generation and staleness detection | 1 | §3.5.1 |
+| **File-set assembly** with constraint scoping/ordering | 1 | §3.3 |
+| **Build phases 1-7** pipeline skeleton | 1 | §7.1 |
+| **Pre-build validation** (Phase 4 checks) | 1 | §7.4 |
+| **Vivado backend** (Tcl generation, batch execution, log capture) | 1 | §10.3.2 |
+| **Plugin trait definitions** (interfaces only, not loading) | 1 | §10.1, §10.3 |
+| **CLI core** (`build`, `clean`, `env check`, `deps tree`, `lint`) | 1 | §12.2 |
+| **Basic error formatting** and exit codes | 1 | §12.4 |
+| `command` **generator plugin** | 2 | §6.1, §6.2, §6.4 |
+| **Generator DAG** with caching and incrementality | 2 | §6.2, §6.3, §7.3 |
+| `vivado_ip` **generator** (declarative IP) | 2 | §6.5 |
+| **Constraint templating** (`.tpl` preprocessing) | 2 | §3.3.1 |
+| **Build checkpoint/resume** (`--resume`, `--stop-after`, `--start-at`) | 2 | §7.5, §7.2.2 |
+| **JSON build report** with hierarchical metrics | 2 | §9.1, §9.4 |
+| **Dry run** (`--dry-run`) | 2 | §7.6 |
+| `loom lsp` (HDL editor integration) | 2 | §12.3 |
+| `loom ip upgrade` with property validation | 2 | §6.5.1 |
+| `loom migrate xci-to-toml` | 2 | §6.6.1 |
+| **PyO3 plugin loading** (Python plugin host) | 2 | §10.2, §7.7.1 |
+| **Windows support** (path handling, PowerShell, CI) | 2 | §13.4 |
+| **Platform model** (platform.toml, parameter substitution) | 3 | §4 |
+| **Virtual platforms** (sim-only) | 3 | §4.1.1 |
+| **Component variants** (overlay model, tag-based selection) | 3 | §3.4 |
+| **Build profiles** (simple and dimensional) | 3 | §5.2 |
+| **OOC synthesis** per-component caching | 3 | §7.2.1 |
+| **Scaffolding** (`loom new component/project/platform`) | 3 | §12.2 |
+| **Reporter plugins** and metrics diff | 4 | §9.5, §9.2 |
+| **Hook system** with full contract | 4 | §10.5 |
+| `loom env shell` | 4 | §13.3 |
+| **Quartus backend** | 4 | §10.6, §15 |
+| `BackendCapabilities` model | 4 | §10.6 |
+| **Simulator plugins** with capability model | 5 | §10.3.3 |
+| **Strategy sweeps** (parallel multi-strategy) | 5 | §8.2 |
+| **Incremental build** (reference checkpoints) | 5 | §7.3.1 |
+| **yosys + nextpnr backend** | 5 | §10.6, §15 |
+| **Test organization** model | 6 | §16 |
+| **Package registry**, Lattice Radiant, ecosystem | 7 | §15 |
+
+### 0.2 Implementation Stack
+
+| Layer | Technology | Notes |
+|---|---|---|
+| Core binary | Rust | `clap` for CLI, `toml` crate for parsing, `serde` for serialization |
+| Plugin host | PyO3 | Embedded Python interpreter, plugins loaded as Python modules |
+| Plugin SDK | Python (`loom.plugin`) | ABC-based interfaces, subprocess execution for actual work |
+| Backend packages | Python (`pip install loom-vivado-backend`) | Separate packages per vendor |
+| Configuration | TOML | `component.toml`, `project.toml`, `platform.toml`, `workspace.toml` |
+| Build artifacts | `.build/` directory | Gitignored, per-project/strategy subdirectories |
+| Lockfile | `loom.lock` (TOML) | Committed to VCS |
+
+### 0.3 Phase 1 Implementation Boundaries
+
+Phase 1 scope is deliberately minimal. These features are explicitly **OUT** of Phase 1:
+
+- No generators (no Phase 2 GENERATE step — skip straight from RESOLVE to ASSEMBLE)
+- No platforms (project specifies `part` and `backend` directly via `[target]` block)
+- No profiles, no variants, no OOC synthesis
+- No Python plugin loading (Vivado backend is compiled into the binary as Rust)
+- No metrics extraction (build produces exit code + log path, not structured metrics)
+- No constraint templating (constraint files are static)
+- No `--resume`, `--stop-after`, `--dry-run`
+- No parallelism (`-j` flag parsed but ignored)
+
+Phase 1 produces: `loom build` → parse manifests → resolve deps → assemble file-set → generate Vivado Tcl → run `vivado -mode batch` → report pass/fail.
 
 ---
 
@@ -99,9 +182,9 @@ Optional, higher-level features built on top of the backend interface. These add
 
 ---
 
-## 3. Component Model
+## 3. Component Model [Phase 1]
 
-A **component** is the unit of reuse. It represents a library element — an RTL module or collection of related modules — that can be consumed by projects or other components.
+A **component** is the unit of reuse — an RTL module or collection of related modules consumed by projects or other components.
 
 ### 3.1 Component Manifest
 
@@ -174,7 +257,7 @@ The simulator plugin receives both the generic options and the tool-specific opt
 - **Port definitions or interface contracts.** The build system treats HDL files as opaque. It does not parse them.
 - **Tool-specific settings.** A reusable component should not embed Vivado synthesis directives. If tool-specific overrides are needed, they belong in the consuming project, in a component variant (see §3.4), or in the platform definition (see §4).
 
-### 3.3 Constraint Scoping and Templating
+### 3.3 Constraint Scoping and Templating [Phase 1 scoping, Phase 2 templating]
 
 Components may carry constraints (e.g., CDC false-path declarations, timing exceptions). The constraint file format is backend-specific — `.xdc` for Vivado, `.sdc` for Quartus, `.lpf` for Lattice Radiant, `.pcf` for ice40/nextpnr — but the framework handles scoping and ordering uniformly regardless of format. The `constraint_scope` field tells the framework how to integrate them:
 
@@ -184,7 +267,7 @@ Components may carry constraints (e.g., CDC false-path declarations, timing exce
 
 The framework's constraint assembly logic collects all component-scoped constraints, applies scoping, orders them before project-level global constraints, and produces the final ordered constraint list for the backend.
 
-#### 3.3.1 Constraint Templating
+#### 3.3.1 Constraint Templating [Phase 2]
 
 Constraint files frequently need platform-specific values — clock periods, pin locations, I/O standards. Forcing every parameterized constraint through a full generator is disproportionately heavy for what is usually simple value substitution. Loom provides a lightweight template mechanism for this case.
 
@@ -228,7 +311,7 @@ constraints = [
 # For nextpnr:  constraints = ["constraints/pins.pcf.tpl"]
 ```
 
-### 3.4 Component Variants
+### 3.4 Component Variants [Phase 3]
 
 Some components have vendor-specific or context-specific implementations. For example, a memory controller wrapper might have a Xilinx variant (using MIG) and an Intel variant (using EMIF), or a component might have a "simulation" variant that substitutes behavioral models for synthesis primitives.
 
@@ -314,7 +397,7 @@ The framework logs the resolved variant for each component during Phase 1 (RESOL
 
 If multiple platform tags match different variants of the same component, the build fails with an ambiguity error rather than silently picking one.
 
-### 3.5 Dependency Resolution
+### 3.5 Dependency Resolution [Phase 1]
 
 Components declare dependencies by name and version constraint. The framework provides a **resolution service** that maps names to locations without requiring explicit paths in every manifest.
 
@@ -336,7 +419,7 @@ some_external_lib = { path = "/home/user/dev/some_external_lib" }
 
 The resolver builds a dependency graph and checks for cycles, version conflicts, and missing dependencies before any build work begins.
 
-#### 3.5.1 Lockfile
+#### 3.5.1 Lockfile [Phase 1]
 
 Resolved dependency versions are recorded in a **lockfile** (`loom.lock`) at the workspace root. The lockfile captures the exact resolved version of every dependency, ensuring that two builds of the same commit on different machines produce identical dependency graphs.
 
@@ -394,22 +477,21 @@ Behavior:
 2. **Incremental adoption:** For large projects, teams can temporarily pin critical IPs to exact versions (changing from floating to pinned) and upgrade them one at a time, rather than resolving everything at once.
 3. **After upgrading:** The build report records the resolved IP version for every generator, so the effect of the upgrade is auditable post-hoc.
 
-**Staleness detection.** The lockfile is stale when the *semantic content* of manifests has changed in ways that could alter resolution. Specifically, the lockfile becomes stale when:
+**Staleness detection.** The lockfile is stale when semantic dependency content changes:
 
-- A dependency is added, removed, or has its version constraint changed in any `component.toml` or `project.toml`.
-- A component's declared `version` field changes.
-- A component's declared `name` field changes.
-- A workspace member is added or removed (the member glob resolves to a different set of paths than those recorded in `workspace_members`).
-- A resolution override in `workspace.toml` is added, removed, or changed.
-- The active vendor tool version changes (invalidates `[[ip_resolution]]` entries).
+- Dependency added, removed, or version constraint changed
+- Component `version` or `name` field changed
+- Workspace member set changed (glob resolves to different paths vs. `workspace_members`)
+- Resolution override added, removed, or changed
+- Active vendor tool version changed (invalidates `[[ip_resolution]]`)
 
-The lockfile is **not** stale when: source files change (that's the cache's job), comments change in manifests, descriptions change, or non-dependency metadata changes. Staleness is computed by hashing the semantic dependency graph inputs (names, versions, constraints, overrides), not by comparing file modification times.
+**Not stale when:** source files change (cache's job), comments/descriptions change, or non-dependency metadata changes. Staleness uses semantic hashing of dependency graph inputs, not file timestamps.
 
-**Workspace member tracking.** The `workspace_members` field records the resolved set of paths from the workspace member globs at lockfile generation time. On each build, Loom re-evaluates the globs (which is cheap — just a filesystem glob) and compares against the stored list. If they differ (e.g., a new component directory was added), the lockfile is stale. This avoids the circular dependency of needing full resolution to detect that resolution might have changed — glob evaluation is independent of dependency resolution.
+**Workspace member tracking.** The `workspace_members` field records resolved glob paths at lockfile generation time. On build, Loom re-evaluates globs and compares — if they differ, the lockfile is stale. This avoids needing full resolution just to detect staleness.
 
 For workspace-only resolution (Phase 1), the lockfile is simple — it records which workspace member satisfied each dependency and a content hash. When registry support is added later, the lockfile becomes essential for pinning remote dependency versions.
 
-#### 3.5.2 Resolution Architecture
+#### 3.5.2 Resolution Architecture [Phase 1]
 
 The resolution service is implemented behind a trait with an IO-injectable backend, so that workspace-local resolution (Phase 1) and registry-based resolution (future) share the same interface:
 
@@ -430,7 +512,7 @@ The async interface accommodates network-based registries without requiring a re
 
 ---
 
-## 4. Platform Model
+## 4. Platform Model [Phase 3]
 
 A **platform** captures the board-level reality that a project targets: the FPGA part, available clocks and their frequencies, peripheral interfaces, pin assignments, and other physical constraints. Platforms sit between components and projects — they provide the physical context that projects build against.
 
@@ -545,7 +627,7 @@ pmod_count = 2
 tags = ["vendor:lattice", "toolchain:oss"]
 ```
 
-#### 4.1.1 Virtual Platforms
+#### 4.1.1 Virtual Platforms [Phase 3]
 
 Not every project targets a physical board. IP development, simulation-only testbenches, and early prototyping may not have a target part or physical constraints. A **virtual platform** provides parameter context without requiring physical board details:
 
@@ -574,9 +656,9 @@ addr_width = 16
 
 Virtual platforms enable `loom sim` but disallow `loom build` — there is no part to synthesize for. This is useful for component-level verification where the testbench exercises the component in isolation. If a user tries `loom build` against a virtual platform, the framework errors with a clear message: "Project targets virtual platform 'simulation_generic' which has no FPGA part. Use `loom sim` for simulation, or change the platform to a physical board."
 
-### 4.2 Platform as Parameterization Surface
+### 4.2 Platform as Parameterization Surface [Phase 3]
 
-Platforms provide named values that generators, IP configurations, and constraint templates can reference. This enables a single project definition to target multiple boards by switching the platform:
+Platforms provide named values that generators, IP configs, and constraint templates reference. This enables targeting multiple boards by switching the platform:
 
 ```toml
 # In a generator or IP config, reference platform values:
@@ -590,11 +672,9 @@ properties = { PRIM_IN_FREQ = "${platform.clocks.sys_clk.frequency_mhz}" }
 
 The `${platform....}` syntax is expanded by the framework during manifest resolution. This is intentionally limited to simple value substitution — not a full expression language. If complex logic is needed, that belongs in a generator script that receives platform parameters as inputs.
 
-#### 4.2.1 Platform Parameters in HDL
+#### 4.2.1 Platform Parameters in HDL [Phase 3]
 
-The component manifest (§3.2) intentionally excludes HDL parameters from the build system — `DATA_WIDTH` and `DEPTH` are parameterized within the HDL via instantiation. However, some platform-specific values (like DDR data width or PCIe lane count) must flow from the platform definition into the RTL, typically via Verilog preprocessor defines.
-
-The `defines` mechanism in filesets supports platform parameter substitution:
+Some platform-specific values (DDR data width, PCIe lane count) must flow into RTL via preprocessor defines. The `defines` mechanism supports platform parameter substitution:
 
 ```toml
 # project.toml
@@ -638,7 +718,7 @@ properties = {
 
 This chains naturally with platform switching: targeting a different platform changes the input clock frequency, which regenerates the PLL IP with the correct configuration.
 
-### 4.3 Platform Discovery
+### 4.3 Platform Discovery [Phase 3]
 
 Platforms are stored in the workspace and discovered like components:
 
@@ -665,11 +745,11 @@ members = ["lib/*", "projects/*", "platforms/*"]
 
 ---
 
-## 5. Project Model
+## 5. Project Model [Phase 1]
 
 A **project** is the top-level build target. It composes components and project-specific sources, targeting a platform (or directly specifying a part).
 
-### 5.1 Project Manifest
+### 5.1 Project Manifest [Phase 1]
 
 ```toml
 [project]
@@ -719,7 +799,7 @@ name = "regmap"
 
 When a project targets a platform, the platform provides: part, backend selection, tool version, base constraints, clock definitions, variant defaults, and parameters. The project can override any of these.
 
-### 5.2 Build Profiles
+### 5.2 Build Profiles [Phase 3]
 
 Many real workflows require building the same design with controlled differences: targeting different boards, enabling/disabling features, adjusting clock frequencies for different product tiers. Rather than duplicating entire project manifests, the framework supports **build profiles**.
 
@@ -771,7 +851,7 @@ loom build --profile reduced_channels     # build the 2-channel version
 
 Simple profiles don't compose — selecting `kcu116_port` doesn't combine with `reduced_channels`. When you have orthogonal concerns (board × feature tier × debug level), the combinatorial explosion of simple profiles becomes unmanageable.
 
-**Profile dimensions** solve this. A dimension is a named axis of variation with a set of choices. Profiles from different dimensions compose naturally:
+**Profile dimensions** solve this. A dimension is a named axis of variation with a set of choices that compose orthogonally:
 
 ```toml
 [profile_dimensions.board]
@@ -846,15 +926,15 @@ Simple profiles and dimensional profiles can coexist in the same manifest. Use s
 
 Each profile (whether simple or dimensional) produces its own build artifacts in a separate subdirectory.
 
-### 5.3 Multi-Project Repositories
+### 5.3 Multi-Project Repositories [Phase 1]
 
 For repositories containing multiple FPGA designs (e.g., multiple boards or subsystems), each project has its own `project.toml` in its own directory. There is no cross-project build dependency — if two FPGAs are in the same system, they are independent builds that happen to share components from the same workspace.
 
 ---
 
-## 6. Code Generation
+## 6. Code Generation [Phase 2]
 
-Code generation is a first-class concept. Any file that is **derived** rather than **authored** is the output of a generator. The framework manages generator execution as nodes in the build DAG.
+Code generation is a first-class concept. Any file that is **derived** rather than **authored** is the output of a generator, managed as a node in the build DAG.
 
 ### 6.1 Generator Declaration
 
@@ -934,13 +1014,13 @@ The core ships with a minimal set of built-in generator plugins. Additional type
 | `systemrdl` | Compile SystemRDL register descriptions. |
 | `spinalhdl` | Compile SpinalHDL to Verilog/VHDL. |
 
-### 6.5 Vendor IP Generation
+### 6.5 Vendor IP Generation [Phase 2]
 
-Every major FPGA vendor provides an IP catalog with parameterizable cores (PLLs, memory controllers, PCIe endpoints). The traditional approach — version-controlling vendor-generated files (`.xci`, `.ip`, `.qsys`) — causes persistent friction: these files are opaque, tool-version-dependent, and merge-hostile. Loom's approach: declare IP configuration in the manifest, generate the vendor-specific files at build time.
+Every major FPGA vendor provides parameterizable IP cores (PLLs, memory controllers, PCIe). Version-controlling vendor-generated files (`.xci`, `.ip`, `.qsys`) causes friction: opaque, tool-version-dependent, merge-hostile. Loom's approach: declare IP config in the manifest, generate vendor files at build time.
 
-Each backend provides its own IP generator plugin with the same declarative model: specify the IP identifier and non-default properties, and the backend generates the vendor-specific output products during Phase 2.
+Each backend provides an IP generator plugin: specify the IP identifier and non-default properties, backend generates output products during Phase 2.
 
-#### 6.5.0 Vivado IP (`vivado_ip`)
+#### 6.5.0 Vivado IP [Phase 2] (`vivado_ip`)
 
 ```toml
 [[generators]]
@@ -953,7 +1033,7 @@ properties = { PRIM_IN_FREQ = "${platform.clocks.sys_clk.frequency_mhz}", CLKOUT
 
 The Vivado backend plugin translates this into Tcl that creates the IP, applies configuration, and generates output products. The `.xci` is a build artifact, not a versioned source. This eliminates Vivado version upgrade friction for IP configuration.
 
-#### 6.5.0a Quartus IP (`quartus_ip`)
+#### 6.5.0a Quartus IP [Phase 4] (`quartus_ip`)
 
 ```toml
 [[generators]]
@@ -972,7 +1052,7 @@ The Quartus backend generates a `.ip` parameter file and runs `qsys-generate` or
 
 For open-source flows (yosys + nextpnr), there is no vendor IP catalog — PLL and memory primitives are instantiated directly in RTL using architecture-specific primitives. The `command` or `python` generator can produce parameterized wrapper modules if needed.
 
-#### 6.5.1 VLNV Version Strategy (Vivado-Specific)
+#### 6.5.1 VLNV Version Strategy [Phase 2] (Vivado-Specific)
 
 Vivado rigidly locks IP catalog versions to Vivado versions. `clk_wiz:6.0` exists in 2023.2, but becomes `clk_wiz:6.1` in 2024.1. Hardcoding the IP version in `component.toml` causes builds to break on tool upgrades.
 
@@ -1039,7 +1119,7 @@ vlnv = "xilinx.com:ip:pcie4_uscale_plus"
 tcl_config = "ip/pcie_config.tcl"    # arbitrary Tcl for complex setup
 ```
 
-### 6.6 The Script Escape Hatch Problem
+### 6.6 The Script Escape Hatch Problem [Phase 2]
 
 Vendor tool workflows often involve scripts (Vivado Tcl, Quartus Tcl, yosys commands) that dynamically add source files, modify properties, or perform other actions that are opaque to the build system. This is a fundamental tension: the framework wants a static, declarative view of the file-set, but tool scripts can mutate it at runtime. This is most common in Vivado workflows where teams have accumulated legacy Tcl scripts over years, but applies to any backend with a scripting interface.
 
@@ -1063,9 +1143,9 @@ When `outputs_unknown = true`, the framework:
 - **Forces re-execution of all downstream DAG nodes.** Because the framework cannot know what files the Tcl fragment produced or modified, it must conservatively assume the file-set has changed. This means every `outputs_unknown` generator invalidates the file-set assembly and backend build cache for every build. In practice, this can silently destroy incremental build performance — a project with a single `outputs_unknown` generator will never get a cache hit on its backend build.
 - Emits a warning on every build: `Warning: Generator "legacy_ip_setup" has outputs_unknown=true. Incremental builds are disabled for this project. Run "loom migrate tcl-audit" for migration guidance.`
 
-**Cache invalidation is the key consequence.** Teams should understand that `outputs_unknown = true` is not just a metadata gap — it has a concrete performance cost proportional to their build time. This is by design: it makes the cost of the escape hatch visible and creates pressure to migrate.
+**Cache invalidation is the key consequence.** `outputs_unknown = true` disables incremental builds for the entire project — the cost is proportional to build time. This is by design: it makes the escape hatch's cost visible and creates migration pressure.
 
-#### 6.6.1 Migration Helpers
+#### 6.6.1 Migration Helpers [Phase 2 Vivado, Phase 4 Quartus]
 
 Loom provides tooling to help users migrate from existing vendor project files to declarative generators. The initial migration tools target Vivado (the most common migration path), with Quartus migration tools planned for Phase 4.
 
@@ -1111,9 +1191,9 @@ This is explicitly a **compatibility mechanism**, not a recommended workflow. Th
 
 ---
 
-## 7. Build DAG and Execution
+## 7. Build DAG and Execution [Phase 1 skeleton, Phase 2+ features]
 
-### 7.1 Build Phases
+### 7.1 Build Phases [Phase 1]
 
 A full `loom build` proceeds through the following phases in order. Each phase has a well-defined input and output, and the framework logs phase transitions clearly in the build output.
 
@@ -1151,7 +1231,7 @@ Phase 7: REPORT
 
 Phases 1-4 are fast (seconds). Phase 5 dominates wall-clock time (minutes to hours). The framework makes this phase structure visible to the user — the CLI shows which phase is active, and errors are attributed to the phase they occurred in.
 
-### 7.2 The Build DAG (Phase 5)
+### 7.2 The Build DAG — Phase 5 Detail [Phase 1 linear, Phase 3 OOC DAG]
 
 Phase 5 is not a linear pipeline — it is a **directed acyclic graph of build nodes**. Each node is an invocation of the backend plugin: either an OOC component synthesis or a sub-phase of the top-level build. Edges represent data dependencies (a top-level synthesis that loads OOC checkpoints depends on those checkpoints being built first).
 
@@ -1198,7 +1278,7 @@ OOC nodes with no mutual dependencies execute in parallel (respecting `-j N`). T
 
 This DAG model generalizes naturally. Partial reconfiguration (§17) adds further nodes: the base static build feeds into per-module implementation passes, each producing a partial bitstream. The framework doesn't need special-case logic for each flow — it executes whatever DAG the backend plugin constructs.
 
-#### 7.2.1 Out-of-Context (OOC) Synthesis
+#### 7.2.1 Out-of-Context (OOC) Synthesis [Phase 3]
 
 In large designs, compiling everything from source in a single monolithic synthesis run is too slow. **Out-of-context (OOC) synthesis** allows independent components to be synthesized into their own checkpoints before top-level synthesis. If a component hasn't changed, the backend reuses its cached OOC checkpoint instead of re-synthesizing the source — dramatically reducing iteration time. The concept exists across vendors: Vivado calls it OOC synthesis (producing `.dcp` checkpoints), Quartus Pro calls it design partitions (producing `.qdb` files). Backends that don't support OOC (yosys/nextpnr, Quartus Standard) simply synthesize everything in-context.
 
@@ -1214,7 +1294,7 @@ ooc = true
 ooc_top = "ddr4_ctrl_wrapper"    # synthesis top module within the component
 ```
 
-When Loom encounters OOC-enabled components in the dependency graph, it creates per-component build nodes in the Phase 5 DAG that:
+When Loom encounters OOC-enabled components, it creates per-component build nodes in the Phase 5 DAG:
 
 1. Assemble the component's own file-set (its synth files + its transitive dependencies' synth files)
 2. Run the backend's OOC synthesis flow for that component (for Vivado: `synth_design -mode out_of_context`; for Quartus: design partition in incremental compilation)
@@ -1236,7 +1316,7 @@ The top-level synthesis node in the DAG references these OOC checkpoints instead
 
 *Cross-boundary optimization.* OOC synthesis inserts a hard optimization boundary. The synthesis tool cannot optimize logic across the boundary between an OOC checkpoint and its consumer. For components where cross-boundary optimization is important (e.g., small glue logic, or components whose outputs feed directly into timing-critical paths), OOC may degrade quality of results. The framework emits a diagnostic when OOC is enabled on a component with fewer than a configurable threshold of source files (default: 500 lines), suggesting that the component may be too small to benefit.
 
-#### 7.2.2 Build Sub-Phase Control
+#### 7.2.2 Build Sub-Phase Control [Phase 2]
 
 The default `loom build` runs the full pipeline through bitstream generation. For debugging and iterative development, users often need finer control:
 
@@ -1265,7 +1345,7 @@ The CLI uses the generic sub-phase names. The backend maps them to the tool's ac
 
 The `--start-at` flag requires a valid checkpoint from a prior run. If no checkpoint exists, the build fails with a message indicating which checkpoint is needed. The `--stop-after` flag still produces a checkpoint at the stopping point, so subsequent runs can pick up from there.
 
-### 7.3 Caching and Incrementality
+### 7.3 Caching and Incrementality [Phase 2]
 
 Each phase has a **cache key** computed from its inputs. If the cache key matches a stored result, the phase is skipped.
 
@@ -1276,7 +1356,7 @@ Each phase has a **cache key** computed from its inputs. If the cache key matche
 
 The framework stores cache metadata in the build directory (`.build/`). This directory is gitignored. CI systems can persist it as a cache artifact for cross-run incrementality.
 
-#### 7.3.1 Incremental Build Integration
+#### 7.3.1 Incremental Build Integration [Phase 5]
 
 Vendor tool incrementality is orthogonal to framework-level caching but represents a significant optimization opportunity. When Loom's cache key doesn't match (sources changed), the framework must invoke the vendor tool. But it can still accelerate the build by providing a **reference checkpoint** from a previous run.
 
@@ -1310,7 +1390,7 @@ The backend records which checkpoints are available and their associated cache k
 incremental = false    # force full synthesis/implementation
 ```
 
-### 7.4 Pre-Build Validation
+### 7.4 Pre-Build Validation [Phase 1]
 
 Phase 4 (VALIDATE) runs a series of checks before invoking the vendor tool. This is the "fail fast" mechanism — catching errors here saves minutes to hours compared to catching them deep in synthesis or implementation.
 
@@ -1330,11 +1410,11 @@ Phase 4 (VALIDATE) runs a series of checks before invoking the vendor tool. This
 
 Validation results are reported as a diagnostic list with severity (error, warning, info) and precise source location. Any error-severity diagnostic halts the build before Phase 5 begins.
 
-### 7.5 Error Recovery, Checkpoints, and Resume
+### 7.5 Error Recovery, Checkpoints, and Resume [Phase 2]
 
-FPGA builds are long. When a build fails during Phase 5 (BUILD), restarting from scratch wastes the work already completed. Loom tracks build sub-phase completion via checkpoint files and supports resumption.
+Loom tracks build sub-phase completion via checkpoint files and supports resumption after failure.
 
-**Checkpoint tracking.** The backend plugin reports sub-phase completion to the framework. Each backend produces checkpoints in its own format (Vivado: `.dcp`, Quartus: `.qdb`, yosys/nextpnr: JSON netlist). The framework records which sub-phases completed successfully in a build state file (`.build/<project>/<strategy>/build_state.json`):
+**Checkpoint tracking.** The backend reports sub-phase completion. Each backend produces checkpoints in its own format (Vivado: `.dcp`, Quartus: `.qdb`, yosys/nextpnr: JSON netlist). The framework records status in `.build/<project>/<strategy>/build_state.json`:
 
 ```json
 {
@@ -1366,7 +1446,7 @@ FPGA builds are long. When a build fails during Phase 5 (BUILD), restarting from
 
 **Non-Phase-5 failures.** If the build fails in Phase 1-4 (resolution, generation, assembly, validation), there is nothing to resume — these phases are fast and should be re-run. `--resume` only applies to Phase 5 (BUILD).
 
-### 7.6 Dry Run
+### 7.6 Dry Run [Phase 2]
 
 `loom build --dry-run` executes Phases 1-4 (RESOLVE, GENERATE, ASSEMBLE, VALIDATE) and then prints the Phase 5 execution plan without invoking the vendor tool. The output includes:
 
@@ -1399,34 +1479,30 @@ $ loom build --dry-run
   Dry run complete. Use "loom build" to execute.
 ```
 
-### 7.7 Parallel Execution
+### 7.7 Parallel Execution [Phase 2]
 
 Generator nodes with no mutual dependencies can execute in parallel. The framework supports a configurable parallelism limit (`--jobs N` or `-j N`). Backend build stages are inherently sequential (synthesis before implementation), but multi-strategy sweeps (see §8.2), multi-profile builds, and OOC component builds are embarrassingly parallel across their respective axes.
 
-#### 7.7.1 Plugin Execution Model and the Python GIL
+#### 7.7.1 Plugin Execution Model and the Python GIL [Phase 2]
 
-The plan cites ruff and uv as precedents for Rust + Python/PyO3 architectures. But those tools use Python primarily for configuration parsing, not for runtime plugin execution during builds. Loom's plugins are called repeatedly — generators execute, backends drive multi-hour Vivado sessions, metrics extractors parse results. The PyO3 boundary has real costs: serialization overhead, error propagation complexity, and critically, Python's Global Interpreter Lock (GIL) becomes a concern for parallel generator execution.
+**Problem.** Python's GIL prevents parallel generator execution within a single process.
 
-**The problem.** If parallel generators are Python plugins called via PyO3, only one Python thread can execute Python bytecode at a time. Running four generators "in parallel" via Python threads would serialize their CPU-bound work.
+**Solution: subprocess isolation.** Generators execute as separate processes, not in-process PyO3 calls:
 
-**The solution: subprocess isolation by design.** Generators execute as **separate processes**, not as Python function calls within the Rust host:
+1. Rust core spawns a Python subprocess per generator (or reuses a warm pool).
+2. Each generator runs in its own process with its own GIL — no contention.
+3. IPC is JSON on stdin/stdout. Diagnostics on stderr.
+4. Generators that shell out to tools (Vivado, scripts) are thin wrappers around subprocess calls.
 
-1. The Rust core spawns a Python subprocess for each generator invocation (or reuses a warm subprocess pool).
-2. The generator plugin's `execute()` method runs in its own Python process with its own GIL — no contention with other generators.
-3. Communication between the Rust core and the generator subprocess uses structured IPC: the core sends the generator's config and context as JSON on stdin, the generator writes its output manifest (list of produced files) as JSON on stdout. Diagnostic messages go to stderr.
-4. For generators that shell out to external tools (the common case — Vivado batch, Python scripts, cocotb), the generator process itself is just a thin wrapper that spawns the tool and waits.
+**PyO3 is still used** for plugin discovery, config validation, and lightweight sync calls (`validate()`, `outputs()`). These are brief single-threaded operations. The key distinction: **metadata queries use in-process PyO3; execution uses subprocess isolation.**
 
-This model has several advantages beyond GIL avoidance: process-level isolation means a crashing generator can't corrupt the framework's memory, resource limits (timeout, memory) can be enforced per-process by the OS, and generators can be written in any language (not just Python) since the interface is stdin/stdout JSON.
+**Backend plugins** don't have the GIL problem — only one backend invocation at a time. The `execute_build()` method runs via PyO3 but immediately shells out to the vendor tool. The GIL is released during the blocking `subprocess.wait()`.
 
-**PyO3 is still used** for plugin discovery, configuration validation, and lightweight synchronous calls (e.g., `GeneratorPlugin.outputs()`, `BackendPlugin.validate()`). These are brief, single-threaded operations where GIL contention doesn't matter. The key distinction: **plugin metadata queries use in-process PyO3 calls; plugin execution uses subprocess isolation.**
-
-**Backend plugins** don't have the GIL problem — a build only has one active backend invocation at a time (or a small number for OOC + top-level). The backend plugin's `execute_build()` method runs in the Rust process via PyO3, but it immediately shells out to Vivado/Quartus and blocks on the subprocess. The GIL is released during the blocking wait (Python's `subprocess.Popen.wait()` releases the GIL), so other Python activity (e.g., a reporter plugin running concurrently) is not blocked.
-
-**Performance budget.** The IPC overhead per generator invocation (JSON serialization + process spawn or pool dispatch) should be <100ms. Given that most generators run for seconds to minutes, this is negligible. For the degenerate case of many trivially fast generators, a "batch mode" where the core sends multiple generator configs to a single subprocess in sequence avoids per-invocation process overhead.
+**IPC overhead** target: <100ms per invocation (JSON + process spawn). Negligible vs. generator runtime. Batch mode available for many trivially fast generators.
 
 ---
 
-## 8. Build Configuration
+## 8. Build Configuration [Phase 1 basic, Phase 5 sweeps]
 
 ### 8.1 Basic Configuration
 
@@ -1448,7 +1524,7 @@ default_strategy = "default"
 
 The build section is interpreted by the backend plugin. The core passes it through without validation — the backend owns the schema for tool-specific options.
 
-### 8.2 Strategy Sweeps
+### 8.2 Strategy Sweeps [Phase 5]
 
 For timing closure, multiple implementation strategies can run in parallel:
 
@@ -1469,13 +1545,11 @@ The `--sweep` CLI flag runs all declared strategies in parallel. The framework s
 
 ---
 
-## 9. Build Metrics and Reporting
+## 9. Build Metrics and Reporting [Phase 2 metrics, Phase 4 reporters]
 
 ### 9.1 Metrics Data Model
 
-Metrics are structured as **nested dictionaries**, not flat key-value pairs. This is essential because many metrics have natural sub-structure: timing slack exists per clock domain, utilization exists per region or per module, and power estimates break down by component.
-
-The framework defines a standard top-level structure. Backends populate it with as much detail as they can extract. Every level of the hierarchy is optional — a backend that can only provide summary timing is still conformant.
+Metrics are **nested dictionaries** with natural sub-structure (timing per clock domain, utilization per module). The framework defines a standard hierarchy; backends populate what they can extract. Every level is optional.
 
 **Standard metrics hierarchy:**
 
@@ -1559,15 +1633,14 @@ This allows fast default builds that extract only summary metrics, with the opti
 
 ### 9.3 Metrics Extraction in the Vivado Backend
 
-The Vivado backend extracts metrics in two ways:
+Two extraction methods:
 
-1. **Tcl query phase.** After implementation completes, the backend runs a Tcl script (within the same Vivado session or a new one loading the checkpoint) that executes commands like `report_utilization -return_string`, `get_property SLACK [get_timing_paths]`, etc. and writes structured output (JSON).
-
-2. **Log parsing (fallback).** Some information is only available in log files. The backend parses these with structured parsers (not fragile regexes where possible). Log parsing is the fallback when Tcl queries aren't sufficient.
+1. **Tcl query phase.** After implementation, run a Tcl script (same or new Vivado session) executing `report_utilization -return_string`, `get_property SLACK [get_timing_paths]`, etc., writing structured JSON output.
+2. **Log parsing (fallback).** Parse log files with structured parsers for data not available via Tcl queries.
 
 ### 9.4 Report Output
 
-The framework produces a JSON build report containing all extracted metrics, build metadata (timestamp, tool version, commit hash, strategy used), and pass/fail determination. This is the primary interface for CI integration.
+JSON build report — the primary CI integration interface:
 
 ```json
 {
@@ -1599,7 +1672,7 @@ The framework produces a JSON build report containing all extracted metrics, bui
 }
 ```
 
-### 9.5 Reporter Plugins
+### 9.5 Reporter Plugins [Phase 4]
 
 Reporter plugins consume the JSON build report and produce formatted output for specific consumers:
 
@@ -1614,7 +1687,7 @@ Reporter plugins consume the JSON build report and produce formatted output for 
 
 ---
 
-## 10. Plugin System
+## 10. Plugin System [Phase 1 interfaces, Phase 2 loading]
 
 ### 10.1 Plugin Types
 
@@ -1766,9 +1839,7 @@ class BackendPlugin(ABC):
 
 #### 10.3.3 Simulator Plugin Interface
 
-Simulation is a separate plugin type from synthesis backends. Simulators have a fundamentally different execution model — compile, elaborate, simulate — and the tool diversity (Questa, VCS, Xcelium, Vivado Simulator, Verilator, Icarus) warrants a dedicated interface rather than overloading the backend.
-
-Critically, **simulators are not interchangeable**. Verilator is a cycle-accurate compiler that transpiles SystemVerilog to C++ — it doesn't support `fork`/`join`, has limited interface support, cannot run UVM testbenches, and its "compile" step is really "transpile + gcc." Questa/VCS are full event-driven simulators supporting the complete SystemVerilog/UVM stack. Treating these as interchangeable behind a uniform interface would produce cryptic failures when a UVM testbench is dispatched to Verilator. The interface addresses this via a **capability model**.
+Simulation is a separate plugin type. Simulators have a different execution model (compile → elaborate → simulate), and **are not interchangeable** — Verilator transpiles SV to C++ (no fork/join, limited interfaces, no UVM), while Questa/VCS support the full SystemVerilog/UVM stack. The interface addresses this via a **capability model**: tests declare requirements, and incompatible simulator/test combinations are skipped, not failed.
 
 ```python
 @dataclass
@@ -1923,7 +1994,7 @@ class BuildContext:
     params: dict[str, Any]         # merged platform + project parameters
 ```
 
-### 10.5 Hook System
+### 10.5 Hook System [Phase 4]
 
 Hooks are user-defined commands declared in the manifest and executed at defined lifecycle points. They run as subprocesses with a well-defined contract for input and output.
 
@@ -1955,9 +2026,9 @@ timeout_seconds = 120
 allow_failure = true          # build succeeds even if this hook fails
 ```
 
-**Timeouts.** Every hook has a timeout (default: 300 seconds). A hung hook — especially one calling external services like license servers, dashboards, or notification APIs — should not block the build indefinitely. When a hook exceeds its timeout, the framework kills the process and reports it as a hook failure. The `pre_build` and `post_build` hooks should generally have shorter timeouts (30-60s); `post_report` hooks may need longer for uploads.
+**Timeouts.** Default: 300 seconds. Hook killed on timeout, reported as failure. Pre-phase hooks should use 30-60s; post-report may need longer for uploads.
 
-**`allow_failure`.** Some hooks (like dashboard uploads or notifications) are best-effort. Setting `allow_failure = true` logs the failure as a warning but does not halt the build. This is only valid for `post_build` and `post_report` hooks — pre-phase hooks always fail the build on error, since their purpose is validation.
+**`allow_failure`.** Logs warning but doesn't halt the build. Only valid for `post_build` and `post_report` — pre-phase hooks always fail the build on error.
 
 #### 10.5.2 Lifecycle Points
 
@@ -1992,11 +2063,11 @@ Hooks correspond to the build phases defined in §7.1:
 - Exit 1: Hook failed. Build halts with an error attributing the failure to the hook.
 - Exit 2: Hook wants to signal a warning but not fail the build. The warning is included in the build report.
 
-**Stdout/stderr:** Captured and included in the build log. Hooks should write diagnostics to stderr. If a hook writes JSON to stdout (detected by the framework), that JSON is merged into the build report under a `hooks.<hook_name>` namespace — this is how custom metrics flow into the report.
+**Stdout/stderr:** Captured in build log. Diagnostics to stderr. If stdout is valid JSON, it is merged into the build report under `hooks.<hook_name>` — this is how custom metrics flow into the report.
 
 #### 10.5.4 Context File Schema
 
-The `LOOM_CONTEXT_FILE` is a JSON file with the following structure. The exact fields populated depend on the lifecycle point — earlier hooks have less data available.
+The `LOOM_CONTEXT_FILE` is a JSON file. Fields are populated progressively — earlier hooks have less data. The schema:
 
 ```json
 {
@@ -2075,9 +2146,9 @@ The `LOOM_CONTEXT_FILE` is a JSON file with the following structure. The exact f
 }
 ```
 
-Fields are populated progressively: `pre_generate` hooks see `project`, `platform`, `profile`, `tool`, and `git`. `post_build` hooks see everything including `result` and `metrics`. The framework documents which fields are guaranteed at each lifecycle point.
+Guaranteed fields per lifecycle point: `pre_generate` sees `project`, `platform`, `profile`, `tool`, `git`. `post_build` sees everything including `result` and `metrics`.
 
-### 10.6 Backend Landscape
+### 10.6 Backend Landscape [Reference]
 
 The framework is designed to support a range of synthesis/implementation backends with different characteristics. This section documents the planned backend support and how each maps to the framework's abstractions.
 
@@ -2119,7 +2190,7 @@ When a project uses a feature that the active backend doesn't support (e.g., OOC
 
 ---
 
-## 11. Workspace Structure
+## 11. Workspace Structure [Phase 1]
 
 ### 11.1 Recommended Layout
 
@@ -2202,7 +2273,7 @@ post_build = "tools/hooks/extract_metrics.py"
 
 ---
 
-## 12. CLI Design
+## 12. CLI Design [Phase 1 core, Phase 2 polish]
 
 The primary user interface is a command-line tool. The CLI command is `loom`.
 
@@ -2341,7 +2412,7 @@ Build progress should use a compact, updating display (similar to `cargo build`)
 
 ---
 
-## 13. Environment Management
+## 13. Environment Management [Phase 1 basic, Phase 4 shell]
 
 ### 13.1 Tool Version Enforcement
 
@@ -2364,9 +2435,9 @@ The framework discovers vendor tools via a strict priority order. Higher-priorit
 3. **Standard installation paths** (e.g., `/tools/Xilinx/Vivado/<version>/`, `/tools/intelFPGA_pro/<version>/quartus/`, `/usr/local/bin/yosys`, `C:\Xilinx\Vivado\<version>\` on Windows)
 4. **`PATH` search** — lowest priority.
 
-Multiple versions can be installed simultaneously. The framework selects the version matching the project or platform requirement. When multiple versions satisfy the constraint, the framework selects the highest matching version and logs the choice.
+Multiple versions can be installed simultaneously. The framework selects the highest version matching the project/platform requirement and logs the choice.
 
-`loom env check` reports all discovered tool installations and which one is selected for the current project, making the selection transparent:
+`loom env check` reports discovered tools and selection:
 
 ```
 $ loom env check
@@ -2396,9 +2467,7 @@ $ loom env check                     # OSS project targeting iCE40
 
 ### 13.3 Reproducible Environments
 
-FPGA tools are notoriously stateful and license-server-dependent. Loom provides layered support for environment reproducibility:
-
-**`loom env shell`** — Drops the user into a subshell with the correct tool versions on `PATH`, environment variables configured, and license server settings applied. This is analogous to `poetry shell` or `nix develop`. The shell configuration is derived from the project's platform and tool requirements:
+**`loom env shell`** — Subshell with correct tool versions on `PATH`, environment variables, and license settings. Analogous to `poetry shell` or `nix develop`:
 
 ```
 $ loom env shell
@@ -2417,9 +2486,9 @@ The shell prompt includes the project name to clearly indicate which environment
 
 **Nix integration (future).** For teams using Nix, Loom can generate a `flake.nix` or `shell.nix` that pins the exact tool versions. This is the gold standard for reproducibility but requires Nix adoption.
 
-### 13.4 Cross-Platform Support
+### 13.4 Cross-Platform Support [Phase 2]
 
-FPGA development often spans Windows workstations (Vivado GUI) and Linux build servers. Many teams develop and debug on Windows, then build in Linux CI. Loom commits to **Windows as a first-class platform from Phase 2**, not as an afterthought.
+Windows is a first-class platform from Phase 2. Many teams develop on Windows and build in Linux CI.
 
 #### 13.4.1 Path Handling
 
@@ -2430,9 +2499,7 @@ FPGA development often spans Windows workstations (Vivado GUI) and Linux build s
 
 #### 13.4.2 Shell and Command Execution
 
-The plan's examples use Unix conventions (`.sh` hooks, shell command strings for generators). These are design decisions that need explicit cross-platform handling:
-
-**Generator commands.** The `command` generator plugin (§6.4) executes a command string via `subprocess`. On Windows, this means `cmd.exe /c` or `powershell.exe -Command` rather than `/bin/sh -c`. The framework detects the host platform and dispatches accordingly. Generator commands should be written portably where possible (e.g., `python scripts/gen_regs.py` works on both platforms). For platform-specific cases, the manifest supports explicit overrides:
+**Generator commands.** The `command` generator executes via `subprocess`. On Windows: `cmd.exe /c` or `powershell.exe -Command` instead of `/bin/sh -c`. Manifest supports platform overrides:
 
 ```toml
 [[generators]]
@@ -2443,27 +2510,11 @@ command = "python scripts/gen_regs.py"     # default (portable)
 command_windows = "py scripts\\gen_regs.py" # Windows override (optional)
 ```
 
-The `command_windows` field is optional — if omitted, `command` is used on all platforms. Most commands (`python`, `vivado`) are cross-platform by nature. The override exists for cases like build scripts that use platform-specific tools.
+If `command_windows` is omitted, `command` is used on all platforms.
 
-**Hook scripts.** Hooks are external commands and follow the same convention. Hook declarations should use portable commands or provide platform overrides:
+**Hook scripts.** Same convention — portable commands or platform overrides. Python recommended over shell scripts for cross-platform hooks.
 
-```toml
-[hooks.pre_build]
-command = "python tools/hooks/check_licenses.py"  # portable
-timeout_seconds = 30
-```
-
-The plugin authoring guide will strongly recommend Python for hooks (cross-platform by default) over shell scripts (platform-specific).
-
-**`loom env shell`.** On Linux/macOS, this drops into a subshell with `$SHELL` or `/bin/bash`. On Windows, it activates a PowerShell session with the equivalent environment configuration. The prompt modification works in both environments:
-
-```
-# Linux/macOS
-(loom:radar_processor) $ vivado -version
-
-# Windows PowerShell
-[loom:radar_processor] PS> vivado -version
-```
+**`loom env shell`.** Linux/macOS: subshell with `$SHELL`. Windows: PowerShell session with equivalent environment.
 
 #### 13.4.3 CI and Build Server Considerations
 
@@ -2473,30 +2524,26 @@ Windows CI (GitHub Actions `windows-latest`, Azure DevOps Windows agents) should
 
 ---
 
-## 14. Architecture Decisions
+## 14. Architecture Decisions [Reference]
 
 ### 14.1 Implementation Language
 
 **Decision:** Rust core with Python plugin SDK.
 
-The core framework — manifest parsing, dependency resolution, DAG construction, cache management, and CLI — is implemented in Rust. Plugins (generators, backends, simulators, reporters) are authored in Python and loaded via an embedded Python interpreter (PyO3).
+The core (manifest parsing, dependency resolution, DAG construction, cache management, CLI) is Rust. Plugins (generators, backends, simulators, reporters) are Python, loaded via PyO3.
 
-**Rationale:**
+**Why Rust core:** Sub-200ms CLI startup. Python import overhead makes this unreliable (300-800ms). Core logic (TOML parsing, graph algorithms, file hashing) benefits from Rust's type safety and performance.
 
-The CLI UX goals (§12.1) demand sub-200ms startup and responsive interaction. Python's import overhead makes this target unreliable — even with lazy imports, a non-trivial Python CLI consistently takes 300-800ms to start. Rust eliminates this concern entirely. The core logic (TOML parsing, graph algorithms, file hashing, process management) is well-suited to Rust and benefits from its type safety and performance.
+**Why Python plugins:** FPGA engineers write Python. Generator scripts are Python. Vendor tool interop happens via subprocess. PyO3 bridges the boundary: Rust core embeds Python, loads plugin modules via entry points. Plugin authors see only Python — `import loom.plugin`, subclass, register. See §7.7.1 for the execution model.
 
-The plugin ecosystem, however, must be Python. FPGA engineers write Python, not Rust. Generator scripts are Python. Vendor tool interop (Vivado Tcl, Quartus scripting, yosys subprocess invocation) happens via Python subprocess. Requiring Rust for plugin authoring would kill adoption. PyO3 bridges this cleanly: the Rust core embeds a Python interpreter, loads plugin modules, and calls into them via a well-defined Python API. Plugin authors see only Python — they import `loom.plugin`, subclass `GeneratorPlugin`, and register via entry points. They never touch Rust.
+**Distribution:** Single `loom` binary via `cargo install loom-fpga`. Backend plugins installed separately:
 
-This is the same general architecture used by ruff (Rust CLI, Python ecosystem integration) and uv (Rust package manager for Python). However, an important distinction: ruff and uv use Python primarily for configuration and ecosystem metadata, not for runtime plugin execution during builds. Loom's plugins are called repeatedly during builds — generators execute, backends drive multi-hour Vivado sessions, metrics extractors parse results. The PyO3 boundary has real costs: serialization overhead, error propagation complexity, and Python's GIL during parallel execution. Section 7.7.1 addresses these concerns in detail: the key design decision is that **PyO3 handles plugin dispatch (brief, lightweight); actual work happens in subprocesses (long, parallel-safe)**.
+- `pip install loom-vivado-backend`
+- `pip install loom-quartus-backend`
+- `pip install loom-yosys-backend`
+- `pip install loom-radiant-backend`
 
-**Distribution:** The primary distribution is a single `loom` binary via `cargo install loom-fpga` or platform-specific packages. The binary bundles the Python plugin host. Backend plugins are installed as separate packages into a Loom-managed Python environment:
-
-- `pip install loom-vivado-backend` — AMD/Xilinx Vivado (initial, most fully-featured)
-- `pip install loom-quartus-backend` — Intel/Altera Quartus Prime
-- `pip install loom-yosys-backend` — yosys + nextpnr (OSS flow)
-- `pip install loom-radiant-backend` — Lattice Radiant
-
-This separation means the `loom` binary itself has no vendor dependencies. A CI server running only OSS builds never needs Vivado or Quartus installed.
+The binary has no vendor dependencies. CI servers need only the backends they use.
 
 ### 14.2 Manifest Format
 
@@ -2514,6 +2561,8 @@ This separation means the `loom` binary itself has no vendor dependencies. A CI 
 
 **Goal:** A Vivado project builds from `loom build` to bitstream. No generators, no profiles, no platforms. Just: manifests → dependency resolution → file-set assembly → Vivado non-project-mode build → exit code.
 
+**Deliverables:**
+
 - Rust project skeleton with CLI framework (clap)
 - Manifest parser: `component.toml`, `project.toml`, `workspace.toml` (TOML via `toml` crate)
 - Dependency resolution service (workspace-scoped, no registry)
@@ -2526,6 +2575,198 @@ This separation means the `loom` binary itself has no vendor dependencies. A CI 
 - Basic exit codes and error formatting
 
 **Validation criterion:** An existing Vivado project, re-expressed as Loom manifests, builds successfully and produces an identical bitstream.
+
+#### Phase 1 Crate Structure
+
+```
+loom-fpga/
+├── Cargo.toml                    # workspace manifest
+├── crates/
+│   ├── loom-cli/                 # binary crate — CLI entry point
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── main.rs           # clap setup, command dispatch
+│   │       └── commands/         # one module per CLI command
+│   │           ├── build.rs
+│   │           ├── clean.rs
+│   │           ├── deps.rs
+│   │           ├── env.rs
+│   │           └── lint.rs
+│   ├── loom-core/                # library crate — all framework logic
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── manifest/         # TOML parsing and validation
+│   │       │   ├── component.rs  # ComponentManifest struct + deserialization
+│   │       │   ├── project.rs    # ProjectManifest struct
+│   │       │   ├── workspace.rs  # WorkspaceManifest struct
+│   │       │   └── common.rs     # shared types (VersionReq, FileSet, etc.)
+│   │       ├── resolve/          # dependency resolution
+│   │       │   ├── resolver.rs   # DependencySource trait, workspace resolver
+│   │       │   ├── lockfile.rs   # loom.lock read/write/staleness
+│   │       │   └── graph.rs      # dependency graph construction + cycle detection
+│   │       ├── assemble/         # file-set assembly
+│   │       │   ├── fileset.rs    # collect files, apply constraint scoping
+│   │       │   └── ordering.rs   # constraint ordering (component-scoped before global)
+│   │       ├── build/            # build pipeline orchestration
+│   │       │   ├── pipeline.rs   # Phase 1-7 sequencing
+│   │       │   ├── validate.rs   # Phase 4 pre-build checks
+│   │       │   └── context.rs    # BuildContext passed to backends
+│   │       ├── plugin/           # plugin trait definitions
+│   │       │   ├── backend.rs    # BackendPlugin trait (Rust trait, not Python yet)
+│   │       │   └── generator.rs  # GeneratorPlugin trait (interface only in Phase 1)
+│   │       └── error.rs          # LoomError enum, diagnostic formatting
+│   └── loom-vivado/              # Vivado backend (Rust in Phase 1, Python in Phase 2+)
+│       ├── Cargo.toml
+│       └── src/
+│           ├── lib.rs
+│           ├── tcl_gen.rs        # generate non-project-mode Tcl script
+│           ├── executor.rs       # spawn `vivado -mode batch`, capture logs
+│           └── env_check.rs      # find Vivado, check version, license
+```
+
+#### Phase 1 Core Data Types
+
+These Rust structs are the framework's internal representation. They map directly to the TOML schemas in §3.1, §5.1, §11.2.
+
+```rust
+// loom-core/src/manifest/component.rs
+#[derive(Debug, Deserialize)]
+pub struct ComponentManifest {
+    pub component: ComponentMeta,
+    pub filesets: HashMap<String, FileSet>,
+    pub dependencies: HashMap<String, DependencySpec>,
+    pub synth: Option<SynthOptions>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ComponentMeta {
+    pub name: String,          // "acmecorp/axi_async_fifo"
+    pub version: String,       // semver: "1.2.0"
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FileSet {
+    pub files: Vec<PathBuf>,
+    pub constraints: Option<Vec<PathBuf>>,
+    pub constraint_scope: Option<String>,  // "component" | "global"
+    pub include_synth: Option<bool>,       // sim fileset includes synth files
+    pub defines: Option<Vec<String>>,
+    pub compile_options: Option<Vec<String>>,
+}
+
+// loom-core/src/manifest/project.rs
+#[derive(Debug, Deserialize)]
+pub struct ProjectManifest {
+    pub project: ProjectMeta,
+    pub target: Option<TargetSpec>,       // direct part spec (Phase 1)
+    pub filesets: HashMap<String, FileSet>,
+    pub dependencies: HashMap<String, DependencySpec>,
+    pub build: Option<BuildConfig>,
+    // Phase 3+: platform, profiles, generators
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TargetSpec {
+    pub part: String,           // "xczu7ev-ffvc1156-2-e"
+    pub backend: String,        // "vivado"
+    pub version: Option<String>, // "2023.2"
+}
+
+// loom-core/src/resolve/resolver.rs
+pub struct ResolvedProject {
+    pub project: ProjectManifest,
+    pub dependency_graph: DependencyGraph,  // topologically sorted
+    pub assembled_components: Vec<ResolvedComponent>,
+}
+
+pub struct ResolvedComponent {
+    pub manifest: ComponentManifest,
+    pub source_path: PathBuf,    // where on disk
+    pub resolved_version: String,
+}
+
+// loom-core/src/assemble/fileset.rs
+pub struct AssembledFilesets {
+    pub synth_files: Vec<AssembledFile>,     // ordered: deps first, project last
+    pub constraint_files: Vec<AssembledFile>, // ordered: component-scoped, then global
+    pub defines: Vec<String>,
+}
+
+pub struct AssembledFile {
+    pub path: PathBuf,           // absolute path to file
+    pub source_component: String, // which component contributed this
+    pub scope: Option<String>,    // constraint scope, if applicable
+}
+```
+
+#### Phase 1 Build Pipeline
+
+The Phase 1 `loom build` execution is a linear pipeline (no DAG, no parallelism):
+
+```
+fn build(workspace_root: &Path, project_name: &str) -> Result<BuildResult> {
+    // Phase 1: RESOLVE
+    let workspace = parse_workspace(workspace_root)?;
+    let project = parse_project(workspace_root, project_name)?;
+    let lockfile = load_or_generate_lockfile(&workspace, &project)?;
+    let resolved = resolve_dependencies(&workspace, &project, &lockfile)?;
+
+    // Phase 2: GENERATE — skipped in Phase 1 (no generators)
+
+    // Phase 3: ASSEMBLE
+    let filesets = assemble_filesets(&resolved)?;
+
+    // Phase 4: VALIDATE
+    validate_pre_build(&filesets, &resolved)?;
+
+    // Phase 5: BUILD
+    let backend = VivadoBackend::new(&resolved.project.target)?;
+    backend.check_environment()?;
+    let scripts = backend.generate_build_scripts(&resolved, &filesets)?;
+    let result = backend.execute_build(&scripts)?;
+
+    // Phase 6: EXTRACT — minimal in Phase 1 (just exit code + log path)
+    // Phase 7: REPORT — minimal in Phase 1 (print pass/fail to terminal)
+    
+    Ok(result)
+}
+```
+
+#### Phase 1 Vivado Tcl Generation
+
+The Vivado backend generates a single Tcl script for non-project-mode batch execution:
+
+```tcl
+# Auto-generated by Loom — do not edit
+# Project: radar_processor
+# Part: xczu7ev-ffvc1156-2-e
+
+# Read source files (dependency order)
+read_verilog -sv {/abs/path/lib/axi_common/rtl/axi_common_pkg.sv}
+read_verilog -sv {/abs/path/lib/axi_async_fifo/rtl/cdc_gray_counter.sv}
+read_verilog -sv {/abs/path/lib/axi_async_fifo/rtl/axi_async_fifo.sv}
+read_verilog -sv {/abs/path/projects/radar_processor/src/radar_top.sv}
+
+# Read constraints (component-scoped first, then global)
+read_xdc -ref axi_async_fifo {/abs/path/lib/axi_async_fifo/constraints/cdc_false_paths.xdc}
+read_xdc {/abs/path/projects/radar_processor/constraints/timing.xdc}
+read_xdc {/abs/path/projects/radar_processor/constraints/physical.xdc}
+
+# Synthesis
+synth_design -top radar_top -part xczu7ev-ffvc1156-2-e
+
+# Implementation
+opt_design
+place_design
+route_design
+
+# Bitstream
+write_bitstream -force {.build/radar_processor/default/radar_top.bit}
+```
+
+The Tcl generator must handle: VHDL vs. SystemVerilog `read_*` commands, library mapping for VHDL, absolute paths with forward slashes (even on Windows), and `-ref` scoping for component constraints with `constraint_scope = "component"`.
 
 ### Phase 2: Generators, Caching, and CLI Polish
 
@@ -2615,7 +2856,7 @@ This phase begins with design work — the test organization model needs careful
 
 ---
 
-## 16. Future Direction: Test Organization
+## 16. Future Direction: Test Organization [Phase 6]
 
 Simulation support in Phase 5 covers the mechanics — compiling, elaborating, and running testbenches. But real verification workflows need more structure: test suites, test cases, selection filters, regression management, and coverage aggregation. This section outlines the design direction for structured test management, which will be designed in Phase 6 and refined through implementation experience.
 
@@ -2742,7 +2983,7 @@ These questions will be resolved through design work in Phase 6:
 
 ---
 
-## 17. Future Direction: Partial Reconfiguration
+## 17. Future Direction: Partial Reconfiguration [Future]
 
 Partial reconfiguration (PR) is increasingly common in production FPGA systems — dynamic loading of accelerators, protocol handlers, and crypto engines at runtime. PR flows are significantly more complex than standard builds and require primitives that the current architecture must accommodate, even if full PR support is a Layer 2 convenience abstraction built later.
 
@@ -2808,7 +3049,7 @@ The detailed PR manifest syntax and orchestration logic are deferred to a future
 | Build DAG | OOC + top-level as nodes | Manual | No | Makefile DAG | Manual |
 | OSS toolchain support | yosys + nextpnr backend | N/A | Yes (via edalize) | Manual | N/A |
 
-Note: FuseSoC/edalize is the closest existing tool in this space. Loom differentiates primarily in its richer build model (DAG-based Phase 5, OOC caching, strategy sweeps, checkpoint resume), platform abstraction with parameterization, and the component variant/profile system. FuseSoC has stronger multi-vendor backend coverage today via edalize; Loom's backend ecosystem will take time to mature.
+FuseSoC/edalize is the closest existing tool. Loom differentiates in build model (DAG-based Phase 5, OOC caching, strategy sweeps, checkpoint resume), platform parameterization, and variant/profile system. FuseSoC has stronger multi-vendor coverage today via edalize.
 
 ---
 
