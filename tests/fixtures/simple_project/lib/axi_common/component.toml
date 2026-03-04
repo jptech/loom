@@ -1,0 +1,6 @@
+[component]
+name = "testorg/axi_common"
+version = "1.0.0"
+
+[filesets.synth]
+files = ["rtl/axi_pkg.sv"]

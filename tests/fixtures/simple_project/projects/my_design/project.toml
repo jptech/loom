@@ -1,0 +1,15 @@
+[project]
+name = "my_design"
+top_module = "top"
+
+[target]
+part = "xczu7ev-ffvc1156-2-e"
+backend = "vivado"
+version = "2023.2"
+
+[filesets.synth]
+files = ["src/top.sv"]
+constraints = ["constraints/timing.xdc"]
+
+[dependencies]
+axi_common = ">=1.0.0"

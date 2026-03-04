@@ -1,0 +1,15 @@
+[package]
+name = "loom-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "loom"
+path = "src/main.rs"
+
+[dependencies]
+loom-core = { path = "../loom-core" }
+loom-vivado = { path = "../loom-vivado" }
+clap.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true

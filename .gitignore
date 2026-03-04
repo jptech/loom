@@ -1,0 +1,16 @@
+/target/
+/.build/
+*.bit
+*.bin
+*.mcs
+*.ltx
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
