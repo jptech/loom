@@ -62,9 +62,47 @@ pub struct BuildOptions {
     pub dry_run: bool,
 }
 
+/// Declares what a backend can and cannot do.
+#[derive(Debug, Clone)]
+pub struct BackendCapabilities {
+    pub supports_ooc: bool,
+    pub supports_incremental: bool,
+    pub supports_ip_generation: bool,
+    pub supports_block_design: bool,
+    pub supports_strategy_sweep: bool,
+    pub checkpoint_format: Option<String>,
+    pub constraint_formats: Vec<String>,
+    pub sub_phases: Vec<String>,
+}
+
+impl Default for BackendCapabilities {
+    fn default() -> Self {
+        Self {
+            supports_ooc: false,
+            supports_incremental: false,
+            supports_ip_generation: false,
+            supports_block_design: false,
+            supports_strategy_sweep: false,
+            checkpoint_format: None,
+            constraint_formats: vec![],
+            sub_phases: vec![
+                "synthesis".to_string(),
+                "place".to_string(),
+                "route".to_string(),
+                "bitstream".to_string(),
+            ],
+        }
+    }
+}
+
 /// The interface a synthesis/implementation backend must implement.
 pub trait BackendPlugin: Send + Sync {
     fn plugin_name(&self) -> &str;
+
+    /// Return the backend's capabilities.
+    fn capabilities(&self) -> BackendCapabilities {
+        BackendCapabilities::default()
+    }
 
     fn check_environment(
         &self,

@@ -1,6 +1,5 @@
 pub mod env_check;
 pub mod executor;
-pub mod ooc;
 pub mod tcl_gen;
 
 use std::path::PathBuf;
@@ -13,25 +12,24 @@ use loom_core::plugin::backend::{
 };
 use loom_core::resolve::resolver::ResolvedProject;
 
-pub struct VivadoBackend;
+pub struct QuartusBackend;
 
-impl BackendPlugin for VivadoBackend {
+impl BackendPlugin for QuartusBackend {
     fn plugin_name(&self) -> &str {
-        "vivado"
+        "quartus"
     }
 
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            supports_ooc: true,
+            supports_ooc: false,
             supports_incremental: true,
             supports_ip_generation: true,
             supports_block_design: true,
-            supports_strategy_sweep: true,
-            checkpoint_format: Some("dcp".to_string()),
-            constraint_formats: vec!["xdc".to_string()],
+            supports_strategy_sweep: false,
+            checkpoint_format: None,
+            constraint_formats: vec!["sdc".to_string(), "qsf".to_string()],
             sub_phases: vec![
                 "synthesis".to_string(),
-                "optimize".to_string(),
                 "place".to_string(),
                 "route".to_string(),
                 "bitstream".to_string(),
@@ -43,7 +41,7 @@ impl BackendPlugin for VivadoBackend {
         &self,
         required_version: Option<&str>,
     ) -> Result<EnvironmentStatus, LoomError> {
-        env_check::check_vivado_environment(required_version)
+        env_check::check_quartus_environment(required_version)
     }
 
     fn validate(
@@ -61,12 +59,8 @@ impl BackendPlugin for VivadoBackend {
         filesets: &AssembledFilesets,
         context: &BuildContext,
     ) -> Result<Vec<PathBuf>, LoomError> {
-        let script = tcl_gen::generate_tcl(project, filesets, context)
-            .map_err(|e| LoomError::Internal(e.to_string()))?;
-
-        let script_path = tcl_gen::write_tcl_script(&script, context)
-            .map_err(|e| LoomError::Internal(e.to_string()))?;
-
+        let script = tcl_gen::generate_quartus_tcl(project, filesets, context)?;
+        let script_path = tcl_gen::write_quartus_tcl(&script, context)?;
         Ok(vec![script_path])
     }
 
@@ -75,6 +69,6 @@ impl BackendPlugin for VivadoBackend {
         scripts: &[PathBuf],
         context: &BuildContext,
     ) -> Result<BuildResult, LoomError> {
-        executor::run_vivado_batch(scripts, context)
+        executor::run_quartus_batch(scripts, context)
     }
 }

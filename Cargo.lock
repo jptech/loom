@@ -455,10 +455,12 @@ dependencies = [
  "colored",
  "indicatif",
  "loom-core",
+ "loom-quartus",
  "loom-vivado",
  "quick-xml",
  "serde_json",
  "tempfile",
+ "toml",
  "walkdir",
 ]
 
@@ -480,6 +482,19 @@ dependencies = [
  "thiserror",
  "toml",
  "walkdir",
+]
+
+[[package]]
+name = "loom-quartus"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "loom-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
 ]
 
 [[package]]
