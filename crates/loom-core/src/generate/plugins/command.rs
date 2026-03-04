@@ -206,6 +206,9 @@ backend = "vivado"
             project_root: tmp.path().to_path_buf(),
             workspace_root: tmp.path().to_path_buf(),
             resolved_components: vec![],
+            platform: None,
+            active_profile: None,
+            variant_selections: std::collections::HashMap::new(),
         };
 
         let context = BuildContext::new(resolved, tmp.path().to_path_buf());
@@ -237,6 +240,9 @@ backend = "vivado"
             project_root: tmp.path().to_path_buf(),
             workspace_root: tmp.path().to_path_buf(),
             resolved_components: vec![],
+            platform: None,
+            active_profile: None,
+            variant_selections: std::collections::HashMap::new(),
         };
 
         let context = BuildContext::new(resolved, tmp.path().to_path_buf());

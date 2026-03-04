@@ -59,6 +59,10 @@ pub enum Commands {
     #[command(subcommand)]
     Migrate(commands::migrate::MigrateCommands),
 
+    /// Create new component, project, or platform
+    #[command(subcommand)]
+    New(commands::new::NewCommands),
+
     /// Show last build report
     Report(commands::report::ReportArgs),
 }
@@ -93,6 +97,7 @@ fn main() {
         Commands::Lint(args) => commands::lint::run(args, &ctx),
         Commands::Lsp(args) => commands::lsp::run(args, &ctx),
         Commands::Migrate(cmd) => commands::migrate::run(cmd, &ctx),
+        Commands::New(cmd) => commands::new::run(cmd, &ctx),
         Commands::Report(args) => commands::report::run(args, &ctx),
     };
 

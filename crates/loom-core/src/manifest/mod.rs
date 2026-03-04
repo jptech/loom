@@ -1,11 +1,13 @@
 pub mod common;
 pub mod component;
 pub mod generator;
+pub mod platform;
 pub mod project;
 pub mod workspace;
 
 pub use component::{ComponentManifest, DependencySpec, FileSet};
 pub use generator::GeneratorDecl;
+pub use platform::PlatformManifest;
 pub use project::{BuildConfig, ProjectManifest, TargetSpec};
 pub use workspace::WorkspaceManifest;
 
@@ -22,6 +24,10 @@ pub fn load_project_manifest(path: &Path) -> Result<ProjectManifest, LoomError> 
 }
 
 pub fn load_workspace_manifest(path: &Path) -> Result<WorkspaceManifest, LoomError> {
+    parse_toml_file(path)
+}
+
+pub fn load_platform_manifest(path: &Path) -> Result<PlatformManifest, LoomError> {
     parse_toml_file(path)
 }
 

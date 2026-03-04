@@ -48,6 +48,14 @@ pub struct BuildArgs {
     /// Show execution plan without building
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Build profile (simple: "kcu116_port", dimensional: "board=kcu116,tier=reduced")
+    #[arg(long)]
+    pub profile: Option<String>,
+
+    /// Build all profile combinations
+    #[arg(long)]
+    pub profile_all: bool,
 }
 
 pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {

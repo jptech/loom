@@ -6,4 +6,5 @@ pub mod ip;
 pub mod lint;
 pub mod lsp;
 pub mod migrate;
+pub mod new;
 pub mod report;

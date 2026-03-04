@@ -16,6 +16,54 @@ pub struct ProjectManifest {
     pub build: Option<BuildConfig>,
     #[serde(rename = "generators", default)]
     pub generators: Vec<GeneratorDecl>,
+    /// Simple profiles.
+    #[serde(default)]
+    pub profiles: HashMap<String, ProfileOverlay>,
+    /// Dimensional profiles.
+    #[serde(default)]
+    pub profile_dimensions: HashMap<String, ProfileDimension>,
+    /// Profile exclusion rules.
+    pub profile_exclusions: Option<ProfileExclusions>,
+}
+
+/// A profile overlay that modifies the base project.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ProfileOverlay {
+    pub description: Option<String>,
+    pub platform: Option<String>,
+    #[serde(default)]
+    pub params: HashMap<String, toml::Value>,
+    pub filesets: Option<ProfileFilesetOverlay>,
+    pub build: Option<BuildConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProfileFilesetOverlay {
+    pub synth: Option<ProfileFileset>,
+    pub sim: Option<ProfileFileset>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProfileFileset {
+    #[serde(default)]
+    pub add_files: Vec<String>,
+    #[serde(default)]
+    pub add_constraints: Vec<String>,
+}
+
+/// A dimensional profile.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProfileDimension {
+    pub description: Option<String>,
+    pub default: String,
+    pub choices: HashMap<String, ProfileOverlay>,
+}
+
+/// Profile exclusion rules.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProfileExclusions {
+    #[serde(default)]
+    pub rules: Vec<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -23,6 +71,8 @@ pub struct ProjectMeta {
     pub name: String,
     pub top_module: String,
     pub description: Option<String>,
+    /// Platform name (resolved from workspace platforms).
+    pub platform: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -48,10 +98,10 @@ impl ProjectManifest {
         if self.project.top_module.is_empty() {
             errors.push("Project top_module cannot be empty.".to_string());
         }
-        if self.target.is_none() {
+        // Either [target] or platform must be specified
+        if self.target.is_none() && self.project.platform.is_none() {
             errors.push(
-                "Project must specify [target] with part and backend. \
-                 (Platform support comes in Phase 3.)"
+                "Project must specify either [target] (part + backend) or platform in [project]."
                     .to_string(),
             );
         }
@@ -135,6 +185,91 @@ build_dir = "output"
 "#;
         let manifest: ProjectManifest = toml::from_str(toml_str).unwrap();
         assert_eq!(manifest.build_dir(), "output");
+    }
+
+    #[test]
+    fn test_parse_project_with_platform() {
+        let toml_str = r#"
+[project]
+name = "radar_processor"
+top_module = "radar_top"
+platform = "zcu104"
+
+[filesets.synth]
+files = ["src/radar_top.sv"]
+"#;
+        let manifest: ProjectManifest = toml::from_str(toml_str).unwrap();
+        assert_eq!(manifest.project.platform.as_deref(), Some("zcu104"));
+        assert!(manifest.target.is_none());
+        assert!(manifest.validate().is_empty()); // platform = valid alternative to [target]
+    }
+
+    #[test]
+    fn test_parse_project_with_profiles() {
+        let toml_str = r#"
+[project]
+name = "radar"
+top_module = "radar_top"
+platform = "zcu104"
+
+[filesets.synth]
+files = ["src/top.sv"]
+
+[profiles.kcu116_port]
+description = "Port to KCU116"
+platform = "kcu116"
+
+[profiles.reduced]
+description = "2-channel version"
+[profiles.reduced.params]
+num_channels = 2
+"#;
+        let manifest: ProjectManifest = toml::from_str(toml_str).unwrap();
+        assert_eq!(manifest.profiles.len(), 2);
+        assert_eq!(
+            manifest.profiles["kcu116_port"].platform.as_deref(),
+            Some("kcu116")
+        );
+        assert!(manifest.profiles["reduced"]
+            .params
+            .contains_key("num_channels"));
+    }
+
+    #[test]
+    fn test_parse_profile_dimensions() {
+        let toml_str = r#"
+[project]
+name = "test"
+top_module = "top"
+platform = "zcu104"
+
+[profile_dimensions.board]
+description = "Target board"
+default = "zcu104"
+
+[profile_dimensions.board.choices.zcu104]
+platform = "zcu104"
+
+[profile_dimensions.board.choices.kcu116]
+platform = "kcu116"
+
+[profile_dimensions.tier]
+description = "Feature tier"
+default = "full"
+
+[profile_dimensions.tier.choices.full]
+[profile_dimensions.tier.choices.full.params]
+num_channels = 8
+
+[profile_dimensions.tier.choices.reduced]
+[profile_dimensions.tier.choices.reduced.params]
+num_channels = 2
+"#;
+        let manifest: ProjectManifest = toml::from_str(toml_str).unwrap();
+        assert_eq!(manifest.profile_dimensions.len(), 2);
+        assert_eq!(manifest.profile_dimensions["board"].default, "zcu104");
+        assert_eq!(manifest.profile_dimensions["board"].choices.len(), 2);
+        assert_eq!(manifest.profile_dimensions["tier"].choices.len(), 2);
     }
 
     #[test]

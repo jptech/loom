@@ -15,6 +15,36 @@ pub struct ComponentManifest {
     pub synth: Option<SynthOptions>,
     #[serde(rename = "generators", default)]
     pub generators: Vec<GeneratorDecl>,
+    /// Named variants for vendor/platform-specific customization.
+    #[serde(default)]
+    pub variants: HashMap<String, ComponentVariant>,
+}
+
+/// A named variant that overlays the base component.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ComponentVariant {
+    pub description: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub filesets: Option<VariantFilesetOverride>,
+    #[serde(rename = "generators", default)]
+    pub generators: Vec<GeneratorDecl>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VariantFilesetOverride {
+    pub synth: Option<VariantFileset>,
+    pub sim: Option<VariantFileset>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VariantFileset {
+    #[serde(default)]
+    pub add_files: Vec<PathBuf>,
+    #[serde(default)]
+    pub remove_files: Vec<PathBuf>,
+    #[serde(default)]
+    pub add_constraints: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -239,6 +269,70 @@ files = []
 "#;
         let manifest: ComponentManifest = toml::from_str(toml_str).unwrap();
         assert!(manifest.generators.is_empty());
+    }
+
+    #[test]
+    fn test_parse_component_with_variants() {
+        let toml_str = r#"
+[component]
+name = "org/memory_ctrl"
+version = "1.0.0"
+
+[filesets.synth]
+files = ["rtl/memory_ctrl.sv"]
+
+[variants.xilinx]
+description = "Xilinx MIG-based implementation"
+tags = ["vendor:xilinx"]
+
+[variants.xilinx.filesets.synth]
+add_files = ["rtl/xilinx/mig_wrapper.sv"]
+add_constraints = ["constraints/xilinx/mig_timing.xdc"]
+
+[[variants.xilinx.generators]]
+name = "mig_ip"
+plugin = "vivado_ip"
+[variants.xilinx.generators.config]
+vlnv = "xilinx.com:ip:mig_7series"
+
+[variants.intel]
+description = "Intel EMIF-based"
+tags = ["vendor:intel"]
+
+[variants.intel.filesets.synth]
+add_files = ["rtl/intel/emif_wrapper.sv"]
+"#;
+        let manifest: ComponentManifest = toml::from_str(toml_str).unwrap();
+        assert_eq!(manifest.variants.len(), 2);
+        let xilinx = &manifest.variants["xilinx"];
+        assert_eq!(xilinx.tags, vec!["vendor:xilinx"]);
+        assert_eq!(
+            xilinx
+                .filesets
+                .as_ref()
+                .unwrap()
+                .synth
+                .as_ref()
+                .unwrap()
+                .add_files
+                .len(),
+            1
+        );
+        assert_eq!(xilinx.generators.len(), 1);
+        assert_eq!(xilinx.generators[0].plugin, "vivado_ip");
+    }
+
+    #[test]
+    fn test_no_variants_default() {
+        let toml_str = r#"
+[component]
+name = "org/comp"
+version = "1.0.0"
+[filesets.synth]
+files = []
+"#;
+        let manifest: ComponentManifest = toml::from_str(toml_str).unwrap();
+        assert!(manifest.variants.is_empty());
     }
 
     #[test]

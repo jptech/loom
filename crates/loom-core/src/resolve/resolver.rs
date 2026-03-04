@@ -16,6 +16,12 @@ pub struct ResolvedProject {
     pub workspace_root: PathBuf,
     /// Topologically ordered: dependencies before dependents.
     pub resolved_components: Vec<ResolvedComponent>,
+    /// Resolved platform, if project specifies one.
+    pub platform: Option<super::platform::ResolvedPlatform>,
+    /// Active profile name, if any.
+    pub active_profile: Option<String>,
+    /// Selected variant per component (component_name -> variant_name).
+    pub variant_selections: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +129,9 @@ pub fn resolve_project(
         project_root,
         workspace_root,
         resolved_components,
+        platform: None,
+        active_profile: None,
+        variant_selections: HashMap::new(),
     })
 }
 
