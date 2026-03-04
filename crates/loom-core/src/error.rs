@@ -37,13 +37,19 @@ pub enum LoomError {
     },
 
     #[error("Ambiguous dependency '{name}': multiple candidates found: {candidates:?}")]
-    AmbiguousDependency { name: String, candidates: Vec<String> },
+    AmbiguousDependency {
+        name: String,
+        candidates: Vec<String>,
+    },
 
     #[error("Invalid version '{version}' for component '{component}'")]
     InvalidVersion { component: String, version: String },
 
     #[error("Invalid version requirement '{constraint}' for dependency '{dependency}'")]
-    InvalidVersionReq { dependency: String, constraint: String },
+    InvalidVersionReq {
+        dependency: String,
+        constraint: String,
+    },
 
     #[error("Lockfile is stale: {reasons:?}")]
     LockfileStale { reasons: Vec<String> },

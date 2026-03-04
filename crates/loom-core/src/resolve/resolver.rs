@@ -46,11 +46,7 @@ impl WorkspaceDependencySource {
             .iter()
             .filter(|(_, m)| {
                 let comp_name = &m.component.name;
-                comp_name == name
-                    || comp_name
-                        .rsplit('/')
-                        .next()
-                        .map_or(false, |short| short == name)
+                comp_name == name || (comp_name.rsplit('/').next() == Some(name))
             })
             .collect();
 
@@ -58,13 +54,12 @@ impl WorkspaceDependencySource {
             0 => Ok(None),
             1 => {
                 let (path, manifest) = &matches[0];
-                let version =
-                    Version::parse(&manifest.component.version).map_err(|_| {
-                        LoomError::InvalidVersion {
-                            component: manifest.component.name.clone(),
-                            version: manifest.component.version.clone(),
-                        }
-                    })?;
+                let version = Version::parse(&manifest.component.version).map_err(|_| {
+                    LoomError::InvalidVersion {
+                        component: manifest.component.name.clone(),
+                        version: manifest.component.version.clone(),
+                    }
+                })?;
                 if constraint.matches(&version) {
                     Ok(Some((path, manifest)))
                 } else {
@@ -98,7 +93,13 @@ pub fn resolve_project(
     let root_id = graph.add_project();
 
     let mut visited = HashSet::new();
-    resolve_dependencies_recursive(root_id, &project.dependencies, source, &mut graph, &mut visited)?;
+    resolve_dependencies_recursive(
+        root_id,
+        &project.dependencies,
+        source,
+        &mut graph,
+        &mut visited,
+    )?;
 
     let ordered = graph.topological_sort()?;
 
@@ -154,13 +155,7 @@ fn resolve_dependencies_recursive(
                 let comp_name = manifest.component.name.clone();
                 if visited.insert(comp_name) {
                     let child_deps = manifest.dependencies.clone();
-                    resolve_dependencies_recursive(
-                        child_id,
-                        &child_deps,
-                        source,
-                        graph,
-                        visited,
-                    )?;
+                    resolve_dependencies_recursive(child_id, &child_deps, source, graph, visited)?;
                 }
             }
         }
@@ -189,8 +184,7 @@ mod tests {
         let (project_root, project_manifest) = find_project(&members, Some("my_design")).unwrap();
 
         let source = WorkspaceDependencySource::new(all_components);
-        let resolved =
-            resolve_project(project_manifest, project_root, root, &source).unwrap();
+        let resolved = resolve_project(project_manifest, project_root, root, &source).unwrap();
 
         assert_eq!(resolved.resolved_components.len(), 1);
         assert_eq!(
@@ -205,12 +199,10 @@ mod tests {
         let (root, ws_manifest) = find_workspace_root(&fixture).unwrap();
         let members = discover_members(&root, &ws_manifest).unwrap();
         let all_components = load_all_components(&members).unwrap();
-        let (project_root, project_manifest) =
-            find_project(&members, Some("top_project")).unwrap();
+        let (project_root, project_manifest) = find_project(&members, Some("top_project")).unwrap();
 
         let source = WorkspaceDependencySource::new(all_components);
-        let resolved =
-            resolve_project(project_manifest, project_root, root, &source).unwrap();
+        let resolved = resolve_project(project_manifest, project_root, root, &source).unwrap();
 
         // top_project -> comp_a -> comp_b, so 2 components
         assert_eq!(resolved.resolved_components.len(), 2);
@@ -223,7 +215,10 @@ mod tests {
             .collect();
         let comp_b_idx = names.iter().position(|n| *n == "testorg/comp_b").unwrap();
         let comp_a_idx = names.iter().position(|n| *n == "testorg/comp_a").unwrap();
-        assert!(comp_b_idx < comp_a_idx, "comp_b should come before comp_a in topological order");
+        assert!(
+            comp_b_idx < comp_a_idx,
+            "comp_b should come before comp_a in topological order"
+        );
     }
 
     #[test]

@@ -1,3 +1,105 @@
+use std::process;
+
+use clap::{Parser, Subcommand};
+
+mod backend_registry;
+mod commands;
+
+#[derive(Parser)]
+#[command(name = "loom", about = "FPGA build system", version, author)]
+pub struct Cli {
+    /// Enable verbose output (-v, -vv for more)
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+    pub verbose: u8,
+
+    /// Suppress all output except errors
+    #[arg(long, global = true)]
+    pub quiet: bool,
+
+    /// Output machine-readable JSON
+    #[arg(long, global = true)]
+    pub json: bool,
+
+    /// Disable colored output
+    #[arg(long, global = true)]
+    pub no_color: bool,
+
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand)]
+pub enum Commands {
+    /// Build the FPGA project
+    Build(commands::build::BuildArgs),
+
+    /// Remove build artifacts
+    Clean(commands::clean::CleanArgs),
+
+    /// Dependency management
+    #[command(subcommand)]
+    Deps(commands::deps::DepsCommands),
+
+    /// Environment management
+    #[command(subcommand)]
+    Env(commands::env::EnvCommands),
+
+    /// Validate manifests without building
+    Lint(commands::lint::LintArgs),
+}
+
+pub struct GlobalContext {
+    pub verbose: u8,
+    pub quiet: bool,
+    pub json: bool,
+    pub no_color: bool,
+}
+
 fn main() {
-    println!("loom - FPGA build system");
+    let cli = Cli::parse();
+
+    let ctx = GlobalContext {
+        verbose: cli.verbose,
+        quiet: cli.quiet,
+        json: cli.json,
+        no_color: cli.no_color,
+    };
+
+    let result = match cli.command {
+        Commands::Build(args) => commands::build::run(args, &ctx),
+        Commands::Clean(args) => commands::clean::run(args, &ctx),
+        Commands::Deps(cmd) => commands::deps::run(cmd, &ctx),
+        Commands::Env(cmd) => commands::env::run(cmd, &ctx),
+        Commands::Lint(args) => commands::lint::run(args, &ctx),
+    };
+
+    match result {
+        Ok(()) => process::exit(0),
+        Err(err) => {
+            display_error(&err, &ctx);
+            process::exit(err.exit_code());
+        }
+    }
+}
+
+fn display_error(err: &loom_core::error::LoomError, ctx: &GlobalContext) {
+    if ctx.json {
+        let json = serde_json::json!({
+            "error": err.to_string(),
+            "exit_code": err.exit_code()
+        });
+        eprintln!(
+            "{}",
+            serde_json::to_string_pretty(&json).unwrap_or_default()
+        );
+    } else {
+        let prefix = match err.exit_code() {
+            1 => "Build error",
+            2 => "Configuration error",
+            3 => "Environment error",
+            _ => "Error",
+        };
+        eprintln!("error[E{}]: {}", err.exit_code(), prefix);
+        eprintln!("  {}", err);
+    }
 }

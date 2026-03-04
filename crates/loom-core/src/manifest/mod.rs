@@ -24,11 +24,10 @@ pub fn load_workspace_manifest(path: &Path) -> Result<WorkspaceManifest, LoomErr
 }
 
 fn parse_toml_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, LoomError> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| LoomError::Io {
-            path: path.to_owned(),
-            source: e,
-        })?;
+    let content = std::fs::read_to_string(path).map_err(|e| LoomError::Io {
+        path: path.to_owned(),
+        source: e,
+    })?;
     toml::from_str::<T>(&content).map_err(|e| LoomError::ManifestParse {
         path: path.to_owned(),
         message: e.to_string(),

@@ -28,12 +28,10 @@ pub enum MemberKind {
 
 /// Walk up from `start` to find a directory containing `workspace.toml`.
 pub fn find_workspace_root(start: &Path) -> Result<(PathBuf, WorkspaceManifest), LoomError> {
-    let start = start
-        .canonicalize()
-        .map_err(|e| LoomError::Io {
-            path: start.to_owned(),
-            source: e,
-        })?;
+    let start = start.canonicalize().map_err(|e| LoomError::Io {
+        path: start.to_owned(),
+        source: e,
+    })?;
 
     let mut current = start.as_path();
     loop {

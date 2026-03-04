@@ -353,6 +353,7 @@ name = "loom-vivado"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "loom-core",
  "serde",
  "serde_json",

@@ -84,11 +84,7 @@ pub fn validate_pre_build(
             ));
         }
 
-        let ext = file
-            .path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let recognized = matches!(
             ext.to_lowercase().as_str(),
             "sv" | "svh" | "v" | "vh" | "vhd" | "vhdl"
@@ -167,29 +163,20 @@ pub fn validate_pre_build(
             }
             if !env_status.license_ok {
                 diagnostics.push(make_error(
-                    format!(
-                        "Backend '{}' license check failed.",
-                        env_status.tool_name
-                    ),
+                    format!("Backend '{}' license check failed.", env_status.tool_name),
                     None,
                 ));
             }
         }
         Err(e) => {
-            diagnostics.push(make_error(
-                format!("Environment check failed: {}", e),
-                None,
-            ));
+            diagnostics.push(make_error(format!("Environment check failed: {}", e), None));
         }
     }
 
     // Check 5: Backend-specific validation
     match backend.validate(resolved, filesets, context) {
         Ok(backend_diagnostics) => diagnostics.extend(backend_diagnostics),
-        Err(e) => diagnostics.push(make_error(
-            format!("Backend validation error: {}", e),
-            None,
-        )),
+        Err(e) => diagnostics.push(make_error(format!("Backend validation error: {}", e), None)),
     }
 
     Ok(ValidationResult { diagnostics })
@@ -216,10 +203,7 @@ mod tests {
             "mock"
         }
 
-        fn check_environment(
-            &self,
-            _req: Option<&str>,
-        ) -> Result<EnvironmentStatus, LoomError> {
+        fn check_environment(&self, _req: Option<&str>) -> Result<EnvironmentStatus, LoomError> {
             Ok(EnvironmentStatus {
                 tool_name: "mock".to_string(),
                 tool_path: PathBuf::from("/usr/bin/mock"),
@@ -316,8 +300,6 @@ mod tests {
         let context = BuildContext::new(resolved.clone(), resolved.workspace_root.clone());
         let backend = MockBackend { pass_env: false };
 
-        let result = validate_pre_build(&resolved, &filesets, &context, &backend).unwrap();
-        // Backend with pass_env=false has no required_version set, so no error is generated
-        // from version mismatch. This is by design - no requirement means any version is OK.
+        let _result = validate_pre_build(&resolved, &filesets, &context, &backend).unwrap();
     }
 }

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -19,8 +19,14 @@ enum NodeData {
     Project,
     Component {
         path: PathBuf,
-        manifest: ComponentManifest,
+        manifest: Box<ComponentManifest>,
     },
+}
+
+impl Default for DependencyGraph {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DependencyGraph {
@@ -38,17 +44,13 @@ impl DependencyGraph {
         id
     }
 
-    pub fn add_or_get_component(
-        &mut self,
-        path: &PathBuf,
-        manifest: &ComponentManifest,
-    ) -> NodeId {
+    pub fn add_or_get_component(&mut self, path: &Path, manifest: &ComponentManifest) -> NodeId {
         if let Some(&existing) = self.name_to_node.get(&manifest.component.name) {
             return existing;
         }
         let id = self.graph.add_node(NodeData::Component {
-            path: path.clone(),
-            manifest: manifest.clone(),
+            path: path.to_path_buf(),
+            manifest: Box::new(manifest.clone()),
         });
         self.name_to_node
             .insert(manifest.component.name.clone(), id);
