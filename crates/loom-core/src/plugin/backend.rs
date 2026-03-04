@@ -49,6 +49,19 @@ pub enum DiagnosticSeverity {
     Info,
 }
 
+/// Options for build execution (resume, stop-after, etc.).
+#[derive(Debug, Clone, Default)]
+pub struct BuildOptions {
+    /// Resume from a checkpoint.
+    pub resume: bool,
+    /// Stop after this phase.
+    pub stop_after: Option<String>,
+    /// Start at this phase (skip earlier phases).
+    pub start_at: Option<String>,
+    /// Dry run — don't actually build.
+    pub dry_run: bool,
+}
+
 /// The interface a synthesis/implementation backend must implement.
 pub trait BackendPlugin: Send + Sync {
     fn plugin_name(&self) -> &str;
@@ -77,6 +90,24 @@ pub trait BackendPlugin: Send + Sync {
         scripts: &[PathBuf],
         context: &BuildContext,
     ) -> Result<BuildResult, LoomError>;
+
+    /// Resume a build from a checkpoint file.
+    fn resume_build(
+        &self,
+        _checkpoint: &std::path::Path,
+        _from_phase: &str,
+        _options: &BuildOptions,
+        _context: &BuildContext,
+    ) -> Result<BuildResult, LoomError> {
+        Err(LoomError::Internal(
+            "resume_build not supported by this backend".to_string(),
+        ))
+    }
+
+    /// Extract metrics from a completed build.
+    fn extract_metrics(&self, _context: &BuildContext) -> Result<serde_json::Value, LoomError> {
+        Ok(serde_json::Value::Null)
+    }
 }
 
 #[cfg(test)]

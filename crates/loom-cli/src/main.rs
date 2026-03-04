@@ -46,6 +46,9 @@ pub enum Commands {
 
     /// Validate manifests without building
     Lint(commands::lint::LintArgs),
+
+    /// Show last build report
+    Report(commands::report::ReportArgs),
 }
 
 pub struct GlobalContext {
@@ -71,6 +74,7 @@ fn main() {
         Commands::Deps(cmd) => commands::deps::run(cmd, &ctx),
         Commands::Env(cmd) => commands::env::run(cmd, &ctx),
         Commands::Lint(args) => commands::lint::run(args, &ctx),
+        Commands::Report(args) => commands::report::run(args, &ctx),
     };
 
     match result {
