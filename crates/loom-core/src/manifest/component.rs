@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
+use super::generator::GeneratorDecl;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ComponentManifest {
     pub component: ComponentMeta,
@@ -11,6 +13,8 @@ pub struct ComponentManifest {
     #[serde(default)]
     pub dependencies: HashMap<String, DependencySpec>,
     pub synth: Option<SynthOptions>,
+    #[serde(rename = "generators", default)]
+    pub generators: Vec<GeneratorDecl>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -189,6 +193,52 @@ constraints = ["timing.xdc"]
 "#;
         let manifest: ComponentManifest = toml::from_str(toml_str).unwrap();
         assert_eq!(manifest.filesets["synth"].constraint_scope, "component");
+    }
+
+    #[test]
+    fn test_parse_generator_manifest() {
+        let toml_str = r#"
+[component]
+name = "org/comp"
+version = "1.0.0"
+[filesets.synth]
+files = []
+
+[[generators]]
+name = "regmap"
+plugin = "command"
+command = "python gen.py"
+inputs = ["regs.yaml"]
+outputs = ["generated/regs.sv"]
+fileset = "synth"
+
+[[generators]]
+name = "sys_clk"
+plugin = "vivado_ip"
+[generators.config]
+vlnv = "xilinx.com:ip:clk_wiz"
+"#;
+        let manifest: ComponentManifest = toml::from_str(toml_str).unwrap();
+        assert_eq!(manifest.generators.len(), 2);
+        assert_eq!(manifest.generators[0].name, "regmap");
+        assert_eq!(manifest.generators[0].plugin, "command");
+        assert_eq!(manifest.generators[0].inputs.len(), 1);
+        assert_eq!(manifest.generators[0].outputs.len(), 1);
+        assert_eq!(manifest.generators[1].plugin, "vivado_ip");
+        assert!(manifest.generators[1].config.is_some());
+    }
+
+    #[test]
+    fn test_no_generators_default() {
+        let toml_str = r#"
+[component]
+name = "org/comp"
+version = "1.0.0"
+[filesets.synth]
+files = []
+"#;
+        let manifest: ComponentManifest = toml::from_str(toml_str).unwrap();
+        assert!(manifest.generators.is_empty());
     }
 
     #[test]

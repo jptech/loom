@@ -16,3 +16,7 @@ hex.workspace = true
 glob.workspace = true
 walkdir.workspace = true
 petgraph.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

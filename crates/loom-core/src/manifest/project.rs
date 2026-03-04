@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use super::component::{DependencySpec, FileSet};
+use super::generator::GeneratorDecl;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProjectManifest {
@@ -13,6 +14,8 @@ pub struct ProjectManifest {
     #[serde(default)]
     pub dependencies: HashMap<String, DependencySpec>,
     pub build: Option<BuildConfig>,
+    #[serde(rename = "generators", default)]
+    pub generators: Vec<GeneratorDecl>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

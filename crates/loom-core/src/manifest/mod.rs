@@ -1,9 +1,11 @@
 pub mod common;
 pub mod component;
+pub mod generator;
 pub mod project;
 pub mod workspace;
 
 pub use component::{ComponentManifest, DependencySpec, FileSet};
+pub use generator::GeneratorDecl;
 pub use project::{BuildConfig, ProjectManifest, TargetSpec};
 pub use workspace::WorkspaceManifest;
 
