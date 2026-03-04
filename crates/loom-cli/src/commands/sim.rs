@@ -170,9 +170,16 @@ fn get_simulator(name: &str) -> Result<Box<dyn SimulatorPlugin>, LoomError> {
     match name {
         "xsim" => Ok(Box::new(loom_xsim::XsimBackend)),
         "verilator" => Ok(Box::new(loom_verilator::VerilatorBackend)),
+        "icarus" => Ok(Box::new(loom_icarus::IcarusBackend)),
+        "questa" => Ok(Box::new(loom_questa::QuestaBackend)),
+        "vcs" => Ok(Box::new(loom_vcs::VcsBackend)),
+        "xcelium" => Ok(Box::new(loom_xcelium::XceliumBackend)),
         _ => Err(LoomError::ToolNotFound {
             tool: name.to_string(),
-            message: format!("Unknown simulator '{}'. Supported: xsim, verilator.", name),
+            message: format!(
+                "Unknown simulator '{}'. Supported: xsim, verilator, icarus, questa, vcs, xcelium.",
+                name
+            ),
         }),
     }
 }

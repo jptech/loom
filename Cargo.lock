@@ -455,9 +455,14 @@ dependencies = [
  "colored",
  "indicatif",
  "loom-core",
+ "loom-icarus",
  "loom-quartus",
+ "loom-questa",
+ "loom-radiant",
+ "loom-vcs",
  "loom-verilator",
  "loom-vivado",
+ "loom-xcelium",
  "loom-xsim",
  "loom-yosys",
  "quick-xml",
@@ -488,6 +493,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "loom-icarus"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "loom-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "loom-quartus"
 version = "0.1.0"
 dependencies = [
@@ -498,6 +515,42 @@ dependencies = [
  "serde_json",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "loom-questa"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "loom-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "loom-radiant"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "loom-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "loom-vcs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "loom-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -523,6 +576,18 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "thiserror",
+]
+
+[[package]]
+name = "loom-xcelium"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "loom-core",
+ "regex",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

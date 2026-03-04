@@ -63,6 +63,10 @@ pub enum Commands {
     #[command(subcommand)]
     New(commands::new::NewCommands),
 
+    /// Package registry operations
+    #[command(subcommand)]
+    Registry(commands::registry::RegistryCommands),
+
     /// Show last build report
     Report(commands::report::ReportArgs),
 
@@ -101,6 +105,7 @@ fn main() {
         Commands::Lsp(args) => commands::lsp::run(args, &ctx),
         Commands::Migrate(cmd) => commands::migrate::run(cmd, &ctx),
         Commands::New(cmd) => commands::new::run(cmd, &ctx),
+        Commands::Registry(cmd) => commands::registry::run(cmd, &ctx),
         Commands::Report(args) => commands::report::run(args, &ctx),
         Commands::Sim(args) => commands::sim::run(args, &ctx),
     };

@@ -1,5 +1,18 @@
 [workspace]
-members = ["crates/loom-cli", "crates/loom-core", "crates/loom-quartus", "crates/loom-vivado", "crates/loom-xsim", "crates/loom-verilator", "crates/loom-yosys"]
+members = [
+    "crates/loom-cli",
+    "crates/loom-core",
+    "crates/loom-quartus",
+    "crates/loom-vivado",
+    "crates/loom-xsim",
+    "crates/loom-verilator",
+    "crates/loom-yosys",
+    "crates/loom-radiant",
+    "crates/loom-icarus",
+    "crates/loom-questa",
+    "crates/loom-vcs",
+    "crates/loom-xcelium",
+]
 resolver = "2"
 
 [workspace.dependencies]

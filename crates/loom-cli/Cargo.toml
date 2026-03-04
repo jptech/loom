@@ -14,6 +14,11 @@ loom-quartus = { path = "../loom-quartus" }
 loom-xsim = { path = "../loom-xsim" }
 loom-verilator = { path = "../loom-verilator" }
 loom-yosys = { path = "../loom-yosys" }
+loom-radiant = { path = "../loom-radiant" }
+loom-icarus = { path = "../loom-icarus" }
+loom-questa = { path = "../loom-questa" }
+loom-vcs = { path = "../loom-vcs" }
+loom-xcelium = { path = "../loom-xcelium" }
 clap.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
