@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use super::generator::GeneratorDecl;
+use super::test::{TestDecl, TestSuiteDecl};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ComponentManifest {
@@ -18,6 +19,12 @@ pub struct ComponentManifest {
     /// Named variants for vendor/platform-specific customization.
     #[serde(default)]
     pub variants: HashMap<String, ComponentVariant>,
+    /// Test declarations.
+    #[serde(rename = "tests", default)]
+    pub tests: Vec<TestDecl>,
+    /// Test suites.
+    #[serde(default)]
+    pub test_suites: HashMap<String, TestSuiteDecl>,
 }
 
 /// A named variant that overlays the base component.
@@ -73,7 +80,7 @@ fn default_constraint_scope() -> String {
     "component".to_string()
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
 #[serde(untagged)]
 pub enum DependencySpec {
     Simple(String),

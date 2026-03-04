@@ -3,12 +3,14 @@ pub mod component;
 pub mod generator;
 pub mod platform;
 pub mod project;
+pub mod test;
 pub mod workspace;
 
 pub use component::{ComponentManifest, DependencySpec, FileSet};
 pub use generator::GeneratorDecl;
 pub use platform::PlatformManifest;
 pub use project::{BuildConfig, ProjectManifest, TargetSpec};
+pub use test::{TestCaseResult, TestDecl, TestStatus, TestSuiteDecl, TestSuiteReport};
 pub use workspace::WorkspaceManifest;
 
 use std::path::Path;
