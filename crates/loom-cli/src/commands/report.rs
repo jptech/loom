@@ -8,8 +8,8 @@ use loom_core::plugin::reporter::{
     ConsoleReporter, GitHubActionsReporter, JUnitReporter, JsonReporter, ReporterPlugin,
 };
 use loom_core::resolve::{
-    discover_members, find_project, find_workspace_root, load_all_components, resolve_project,
-    WorkspaceDependencySource,
+    discover_members, find_workspace_root, load_all_components, resolve_project,
+    resolve_project_selection, WorkspaceDependencySource,
 };
 
 use crate::ui::{self, Icon};
@@ -44,10 +44,12 @@ pub fn run(args: ReportArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     let members = discover_members(&workspace_root, &ws_manifest)?;
     let all_components = load_all_components(&members)?;
 
-    let (project_root, project_manifest) = match &args.project {
-        Some(name) => find_project(&members, Some(name))?,
-        None => find_project(&members, None)?,
-    };
+    let (project_root, project_manifest) = resolve_project_selection(
+        &members,
+        args.project.as_deref(),
+        Some(&cwd),
+        ws_manifest.settings.default_project.as_deref(),
+    )?;
 
     let source = WorkspaceDependencySource::new(all_components);
     let resolved = resolve_project(

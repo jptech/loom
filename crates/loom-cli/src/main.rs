@@ -54,6 +54,9 @@ pub enum Commands {
     /// Validate manifests without building
     Lint(commands::lint::LintArgs),
 
+    /// List workspace members (projects, components, platforms)
+    List(commands::list::ListArgs),
+
     /// Export LSP configuration
     Lsp(commands::lsp::LspArgs),
 
@@ -120,6 +123,7 @@ fn main() {
         Commands::Env(cmd) => commands::env::run(cmd, &ctx),
         Commands::Ip(cmd) => commands::ip::run(cmd, &ctx),
         Commands::Lint(args) => commands::lint::run(args, &ctx),
+        Commands::List(args) => commands::list::run(args, &ctx),
         Commands::Lsp(args) => commands::lsp::run(args, &ctx),
         Commands::Migrate(cmd) => commands::migrate::run(cmd, &ctx),
         Commands::New(cmd) => commands::new::run(cmd, &ctx),

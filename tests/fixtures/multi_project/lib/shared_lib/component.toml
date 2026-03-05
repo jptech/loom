@@ -1,0 +1,6 @@
+[component]
+name = "testorg/shared_lib"
+version = "1.0.0"
+
+[filesets.synth]
+files = ["rtl/shared.sv"]

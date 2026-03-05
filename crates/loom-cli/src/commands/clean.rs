@@ -1,7 +1,7 @@
 use clap::Args;
 
 use loom_core::error::LoomError;
-use loom_core::resolve::{discover_members, find_workspace_root, MemberKind, MemberPath};
+use loom_core::resolve::{discover_members, find_workspace_root, resolve_project_selection};
 
 use crate::ui::{self, Icon};
 use crate::GlobalContext;
@@ -45,13 +45,13 @@ pub fn run(args: CleanArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
         }
     } else {
         let members = discover_members(&workspace_root, &ws_manifest)?;
-        let project_name = args
-            .project
-            .clone()
-            .or_else(|| detect_project_from_cwd(&cwd, &members))
-            .ok_or_else(|| LoomError::ProjectNotFound {
-                name: "<auto-detect>".to_string(),
-            })?;
+        let (_, project_manifest) = resolve_project_selection(
+            &members,
+            args.project.as_deref(),
+            Some(&cwd),
+            ws_manifest.settings.default_project.as_deref(),
+        )?;
+        let project_name = project_manifest.project.name;
 
         let project_build_dir = build_dir.join(&project_name);
         if project_build_dir.exists() {
@@ -75,18 +75,4 @@ pub fn run(args: CleanArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
         }
     }
     Ok(())
-}
-
-fn detect_project_from_cwd(cwd: &std::path::Path, members: &[MemberPath]) -> Option<String> {
-    for member in members {
-        if member.kind == MemberKind::Project
-            && (cwd.starts_with(&member.path) || cwd == member.path)
-        {
-            let manifest_path = member.path.join("project.toml");
-            if let Ok(m) = loom_core::manifest::load_project_manifest(&manifest_path) {
-                return Some(m.project.name);
-            }
-        }
-    }
-    None
 }

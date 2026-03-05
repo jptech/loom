@@ -124,6 +124,47 @@ pub fn load_all_components(
         .collect()
 }
 
+/// Resolve which project to use, with a consistent priority:
+/// 1. Explicit name from --project flag
+/// 2. CWD-based detection
+/// 3. Workspace default_project setting
+/// 4. Auto-detect (only if exactly one project exists)
+pub fn resolve_project_selection(
+    members: &[MemberPath],
+    explicit_name: Option<&str>,
+    cwd: Option<&Path>,
+    default_project: Option<&str>,
+) -> Result<(PathBuf, ProjectManifest), LoomError> {
+    if let Some(name) = explicit_name {
+        return find_project(members, Some(name));
+    }
+    if let Some(cwd) = cwd {
+        if let Some(name) = detect_project_from_cwd(cwd, members) {
+            return find_project(members, Some(&name));
+        }
+    }
+    if let Some(default) = default_project {
+        return find_project(members, Some(default));
+    }
+    find_project(members, None)
+}
+
+/// Detect the current project from the working directory.
+/// Returns the project name if CWD is inside a project member directory.
+pub fn detect_project_from_cwd(cwd: &Path, members: &[MemberPath]) -> Option<String> {
+    for member in members {
+        if member.kind == MemberKind::Project
+            && (cwd.starts_with(&member.path) || cwd == member.path)
+        {
+            let manifest_path = member.path.join("project.toml");
+            if let Ok(m) = load_project_manifest(&manifest_path) {
+                return Some(m.project.name);
+            }
+        }
+    }
+    None
+}
+
 /// Find a project by name. If `project_name` is None, returns the only project
 /// (errors if zero or multiple projects exist).
 pub fn find_project(
@@ -159,13 +200,18 @@ pub fn find_project(
                     name: "<any>".to_owned(),
                 })
             } else {
-                Err(LoomError::Internal(format!(
-                    "Multiple projects found in workspace. Specify one with --project. Found: {:?}",
-                    project_members
-                        .iter()
-                        .map(|m| m.path.display().to_string())
-                        .collect::<Vec<_>>()
-                )))
+                let mut names = Vec::new();
+                for member in &project_members {
+                    let manifest_path = member.path.join("project.toml");
+                    if let Ok(m) = load_project_manifest(&manifest_path) {
+                        names.push(format!("'{}'", m.project.name));
+                    } else {
+                        names.push(format!("'{}'", member.path.display()));
+                    }
+                }
+                Err(LoomError::AmbiguousProject {
+                    names: names.join(", "),
+                })
             }
         }
     }
@@ -237,6 +283,39 @@ mod tests {
         let components = load_all_components(&members).unwrap();
         assert_eq!(components.len(), 1);
         assert_eq!(components[0].1.component.name, "testorg/axi_common");
+    }
+
+    #[test]
+    fn test_find_project_ambiguous() {
+        let fixture = fixture_path("multi_project");
+        let (root, manifest) = find_workspace_root(&fixture).unwrap();
+        let members = discover_members(&root, &manifest).unwrap();
+        let result = find_project(&members, None);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("design_a"),
+            "Error should contain project name 'design_a': {}",
+            msg
+        );
+        assert!(
+            msg.contains("design_b"),
+            "Error should contain project name 'design_b': {}",
+            msg
+        );
+        assert_eq!(err.exit_code(), 2);
+    }
+
+    #[test]
+    fn test_find_project_by_name_multi_project() {
+        let fixture = fixture_path("multi_project");
+        let (root, manifest) = find_workspace_root(&fixture).unwrap();
+        let members = discover_members(&root, &manifest).unwrap();
+        let (_, project) = find_project(&members, Some("design_a")).unwrap();
+        assert_eq!(project.project.name, "design_a");
+        let (_, project) = find_project(&members, Some("design_b")).unwrap();
+        assert_eq!(project.project.name, "design_b");
     }
 
     #[test]

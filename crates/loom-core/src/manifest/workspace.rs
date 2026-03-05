@@ -23,6 +23,7 @@ pub struct WorkspaceMeta {
 pub struct WorkspaceSettings {
     pub default_tool_version: Option<String>,
     pub build_dir: Option<String>,
+    pub default_project: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

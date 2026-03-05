@@ -47,6 +47,10 @@ pub struct SimArgs {
     /// Random seed
     #[arg(long)]
     pub seed: Option<u64>,
+
+    /// Project name (default: auto-detect)
+    #[arg(short = 'p', long)]
+    pub project: Option<String>,
 }
 
 pub fn run(args: SimArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
@@ -65,7 +69,12 @@ pub fn run(args: SimArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     let (workspace_root, ws_manifest) = loom_core::resolve::find_workspace_root(&cwd)?;
     let members = loom_core::resolve::discover_members(&workspace_root, &ws_manifest)?;
     let all_components = loom_core::resolve::load_all_components(&members)?;
-    let (_project_root, project_manifest) = loom_core::resolve::find_project(&members, None)?;
+    let (_project_root, project_manifest) = loom_core::resolve::resolve_project_selection(
+        &members,
+        args.project.as_deref(),
+        Some(&cwd),
+        ws_manifest.settings.default_project.as_deref(),
+    )?;
 
     let source = loom_core::resolve::WorkspaceDependencySource::new(all_components);
     let resolved = loom_core::resolve::resolve_project(

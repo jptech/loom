@@ -1,0 +1,13 @@
+[project]
+name = "design_b"
+top_module = "top_b"
+
+[target]
+part = "xc7k325t-ffg900-2"
+backend = "vivado"
+
+[filesets.synth]
+files = ["src/top_b.sv"]
+
+[dependencies]
+shared_lib = ">=1.0.0"
