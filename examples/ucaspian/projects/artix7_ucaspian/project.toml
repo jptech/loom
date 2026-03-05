@@ -1,0 +1,17 @@
+[project]
+name = "artix7_ucaspian"
+top_module = "artix7_top"
+description = "uCaspian neuromorphic processor on Numato Mimas A7 (Artix-7)"
+
+[target]
+part = "xc7a50tfgg484-1"
+backend = "vivado"
+
+[filesets.synth]
+files = ["src/artix7_top.sv"]
+constraints = ["constraints/mimas_a7.xdc"]
+constraint_scope = "global"
+
+[dependencies]
+core = ">=1.0.0"
+io = ">=1.0.0"
