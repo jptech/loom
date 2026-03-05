@@ -86,6 +86,64 @@ pub struct TargetSpec {
 pub struct BuildConfig {
     pub build_dir: Option<String>,
     pub default_strategy: Option<String>,
+    pub reports: Option<ReportConfig>,
+    pub checkpoints: Option<CheckpointConfig>,
+}
+
+/// Configuration for which Vivado reports to generate as files.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ReportConfig {
+    /// Generate utilization reports (default: true)
+    pub utilization: Option<bool>,
+    /// Generate timing reports (default: true)
+    pub timing: Option<bool>,
+    /// Generate power report (default: false)
+    pub power: Option<bool>,
+    /// Generate DRC report (default: false)
+    pub drc: Option<bool>,
+}
+
+impl ReportConfig {
+    pub fn utilization(&self) -> bool {
+        self.utilization.unwrap_or(true)
+    }
+    pub fn timing(&self) -> bool {
+        self.timing.unwrap_or(true)
+    }
+    pub fn power(&self) -> bool {
+        self.power.unwrap_or(false)
+    }
+    pub fn drc(&self) -> bool {
+        self.drc.unwrap_or(false)
+    }
+}
+
+/// Configuration for which DCP checkpoint files to save.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CheckpointConfig {
+    /// Save checkpoint after synthesis (default: false)
+    pub post_synth: Option<bool>,
+    /// Save checkpoint after optimization (default: false)
+    pub post_opt: Option<bool>,
+    /// Save checkpoint after placement (default: true)
+    pub post_place: Option<bool>,
+    /// Save checkpoint after routing (default: true)
+    pub post_route: Option<bool>,
+}
+
+impl CheckpointConfig {
+    pub fn post_synth(&self) -> bool {
+        self.post_synth.unwrap_or(false)
+    }
+    pub fn post_opt(&self) -> bool {
+        self.post_opt.unwrap_or(false)
+    }
+    pub fn post_place(&self) -> bool {
+        self.post_place.unwrap_or(true)
+    }
+    pub fn post_route(&self) -> bool {
+        self.post_route.unwrap_or(true)
+    }
 }
 
 impl ProjectManifest {
@@ -280,5 +338,65 @@ num_channels = 2
         let manifest: ProjectManifest = toml::from_str(&content).unwrap();
         assert_eq!(manifest.project.name, "my_design");
         assert!(manifest.validate().is_empty());
+    }
+
+    #[test]
+    fn test_report_config_defaults() {
+        let config = ReportConfig::default();
+        assert!(config.utilization());
+        assert!(config.timing());
+        assert!(!config.power());
+        assert!(!config.drc());
+    }
+
+    #[test]
+    fn test_checkpoint_config_defaults() {
+        let config = CheckpointConfig::default();
+        assert!(!config.post_synth());
+        assert!(!config.post_opt());
+        assert!(config.post_place());
+        assert!(config.post_route());
+    }
+
+    #[test]
+    fn test_parse_build_config_with_reports() {
+        let toml_str = r#"
+[project]
+name = "test"
+top_module = "top"
+
+[target]
+part = "xc7a35t"
+backend = "vivado"
+
+[build.reports]
+utilization = true
+timing = true
+power = true
+drc = false
+
+[build.checkpoints]
+post_synth = true
+post_place = true
+post_route = true
+"#;
+        let manifest: ProjectManifest = toml::from_str(toml_str).unwrap();
+        let reports = manifest.build.as_ref().unwrap().reports.as_ref().unwrap();
+        assert!(reports.utilization());
+        assert!(reports.timing());
+        assert!(reports.power());
+        assert!(!reports.drc());
+
+        let checkpoints = manifest
+            .build
+            .as_ref()
+            .unwrap()
+            .checkpoints
+            .as_ref()
+            .unwrap();
+        assert!(checkpoints.post_synth());
+        assert!(checkpoints.post_place());
+        assert!(checkpoints.post_route());
+        assert!(!checkpoints.post_opt()); // not set, defaults to false
     }
 }

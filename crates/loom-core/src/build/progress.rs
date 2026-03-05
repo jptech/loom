@@ -1,4 +1,5 @@
-use crate::build::report::{TimingMetrics, UtilizationMetrics};
+use crate::build::report::{ClockTiming, TimingMetrics, UtilizationMetrics};
+use std::collections::HashMap;
 
 /// Events emitted during a build for live progress reporting.
 #[derive(Debug, Clone)]
@@ -141,11 +142,11 @@ impl VivadoOutputParser {
                     .unwrap_or(false);
 
                 if !has_pending {
-                    // No pending Time data — emit using last_elapsed/last_memory fallback
+                    // No pending Time data — emit using wall-clock elapsed time
                     self.phases_completed.push(phase.clone());
                     let elapsed = self
-                        .last_elapsed
-                        .or_else(|| self.phase_start.map(|s| s.elapsed().as_secs_f64()))
+                        .phase_start
+                        .map(|s| s.elapsed().as_secs_f64())
                         .unwrap_or(0.0);
                     let memory = self.last_memory.unwrap_or(0.0);
                     events.push(BuildEvent::PhaseCompleted {
@@ -186,10 +187,18 @@ impl VivadoOutputParser {
 
     /// Flush any pending completion event into the given events vector.
     /// Skips emission if the phase was already completed (e.g., by "completed successfully").
+    ///
+    /// Uses wall-clock timing from `phase_start` rather than Vivado's parsed elapsed time,
+    /// since Vivado may emit spurious `Time (s):` lines that produce inaccurate durations.
+    /// The Vivado-reported peak memory is kept since we can't get that from wall-clock.
     fn flush_pending(&mut self, events: &mut Vec<BuildEvent>) {
-        if let Some((phase, elapsed, memory)) = self.pending_completion.take() {
+        if let Some((phase, _vivado_elapsed, memory)) = self.pending_completion.take() {
             if !self.phases_completed.contains(&phase) {
                 self.phases_completed.push(phase.clone());
+                let elapsed = self
+                    .phase_start
+                    .map(|s| s.elapsed().as_secs_f64())
+                    .unwrap_or(0.0);
                 events.push(BuildEvent::PhaseCompleted {
                     phase,
                     elapsed_secs: elapsed,
@@ -570,7 +579,20 @@ fn parse_util_row(cols: &[&str]) -> Option<(u64, u64, f64)> {
     Some((used, avail, pct))
 }
 
+/// Tracks which subsection of the Intra Clock Table we're parsing.
+#[derive(Debug, PartialEq)]
+enum IntraSubsection {
+    None,
+    Setup,
+    Hold,
+}
+
 /// Parse a Vivado timing summary report captured between LOOM_MARKER delimiters.
+///
+/// Extracts:
+/// - Design-level WNS/TNS/WHS/THS from the "Design Timing Summary" section
+/// - Per-clock timing from "Intra Clock Table" and "Inter Clock Table"
+/// - Clock periods from "Clock Summary" section
 fn parse_timing_report(lines: &[String]) -> Option<TimingMetrics> {
     let mut wns: Option<f64> = None;
     let mut tns: Option<f64> = None;
@@ -578,11 +600,115 @@ fn parse_timing_report(lines: &[String]) -> Option<TimingMetrics> {
     let mut ths: Option<f64> = None;
     let mut failing = 0u32;
 
+    // Clock period info from Clock Summary
+    let mut clock_periods: HashMap<String, f64> = HashMap::new();
+
+    // Per-clock timing data: clock_name -> (wns, tns, failing, total)
+    let mut clock_setup: HashMap<String, (f64, f64, u32, u32)> = HashMap::new();
+    let mut clock_hold: HashMap<String, (f64, f64, u32, u32)> = HashMap::new();
+
+    // Track which section we're in
+    let mut in_clock_summary = false;
+    let mut in_intra_clock = false;
+    let mut in_inter_clock = false;
+    let mut saw_clock_header = false;
+    let mut intra_subsection = IntraSubsection::None;
+
     for line in lines {
         let trimmed = line.trim();
 
-        // Look for "WNS(ns)      TNS(ns)  TNS Failing Endpoints  ..."
-        // Followed by data row like: "7.085       0.000              0  ..."
+        // Detect section boundaries
+        if trimmed.contains("Clock Summary") && trimmed.starts_with('|') {
+            in_clock_summary = true;
+            in_intra_clock = false;
+            in_inter_clock = false;
+            saw_clock_header = false;
+            continue;
+        }
+        if trimmed.contains("Intra Clock Table") {
+            in_intra_clock = true;
+            in_clock_summary = false;
+            in_inter_clock = false;
+            intra_subsection = IntraSubsection::None;
+            continue;
+        }
+        if trimmed.contains("Inter Clock Table") {
+            in_inter_clock = true;
+            in_clock_summary = false;
+            in_intra_clock = false;
+            continue;
+        }
+        // Other section headers reset context
+        if trimmed.starts_with('|') && trimmed.contains("Table") && !trimmed.contains("Clock") {
+            in_clock_summary = false;
+            in_intra_clock = false;
+            in_inter_clock = false;
+        }
+
+        // Parse Clock Summary section for periods
+        // Format: "Clock   Waveform(ns)   Period(ns)   Frequency(MHz)"
+        // Data:   "sys_clk {0.000 5.000}  10.000       100.000"
+        if in_clock_summary {
+            if trimmed.starts_with("Clock") && trimmed.contains("Period") {
+                saw_clock_header = true;
+                continue;
+            }
+            if trimmed.starts_with("-----") {
+                continue;
+            }
+            if saw_clock_header && !trimmed.is_empty() && !trimmed.starts_with('-') {
+                if let Some((name, period)) = parse_clock_summary_row(trimmed) {
+                    clock_periods.insert(name, period);
+                }
+            }
+            // Empty line after data ends the section
+            if saw_clock_header && trimmed.is_empty() {
+                in_clock_summary = false;
+            }
+        }
+
+        // Parse Intra Clock Table
+        // Has two subsections: setup (WNS/TNS) then hold (WHS/THS)
+        // Format: "Clock   WNS(ns)  TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints"
+        //         "clk_sys   7.085    0.000    0                      124"
+        if in_intra_clock {
+            // Detect subsection header: "Clock ... WNS..." (setup) or "Clock ... WHS..." (hold)
+            if trimmed.starts_with("Clock") && (trimmed.contains("WNS") || trimmed.contains("WHS"))
+            {
+                if trimmed.contains("WNS") {
+                    intra_subsection = IntraSubsection::Setup;
+                } else {
+                    intra_subsection = IntraSubsection::Hold;
+                }
+                continue;
+            }
+            if trimmed.starts_with("-----") {
+                continue;
+            }
+            if intra_subsection != IntraSubsection::None
+                && !trimmed.is_empty()
+                && !trimmed.starts_with('-')
+            {
+                if let Some((name, w, t, fail, total)) = parse_clock_timing_row(trimmed) {
+                    match intra_subsection {
+                        IntraSubsection::Setup => {
+                            clock_setup.insert(name, (w, t, fail, total));
+                        }
+                        IntraSubsection::Hold => {
+                            clock_hold.insert(name, (w, t, fail, total));
+                        }
+                        IntraSubsection::None => {}
+                    }
+                }
+            }
+        }
+
+        // Parse Inter Clock Table (same format, but for inter-clock paths)
+        if in_inter_clock {
+            // For now, we don't parse inter-clock paths separately
+        }
+
+        // --- Original design-level parsing ---
         if trimmed.starts_with("WNS") && trimmed.contains("TNS") {
             continue; // header row
         }
@@ -619,6 +745,37 @@ fn parse_timing_report(lines: &[String]) -> Option<TimingMetrics> {
         }
     }
 
+    // Build per-clock timing entries
+    let mut clocks: Vec<ClockTiming> = Vec::new();
+    for (name, (setup_wns, setup_tns, setup_fail, setup_total)) in &clock_setup {
+        let period_ns = clock_periods.get(name).copied();
+        let frequency_mhz = period_ns.map(|p| 1000.0 / p);
+        let (hold_whs, hold_ths, hold_fail, _hold_total) =
+            clock_hold.get(name).copied().unwrap_or((0.0, 0.0, 0, 0));
+        let achieved_mhz = period_ns.map(|p| {
+            let achieved_period = p - setup_wns;
+            if achieved_period > 0.0 {
+                1000.0 / achieved_period
+            } else {
+                f64::INFINITY
+            }
+        });
+        clocks.push(ClockTiming {
+            name: name.clone(),
+            period_ns,
+            frequency_mhz,
+            wns: *setup_wns,
+            tns: *setup_tns,
+            whs: hold_whs,
+            ths: hold_ths,
+            failing_endpoints: setup_fail + hold_fail,
+            total_endpoints: *setup_total,
+            achieved_mhz,
+        });
+    }
+    // Sort clocks by name for deterministic ordering
+    clocks.sort_by(|a, b| a.name.cmp(&b.name));
+
     if let (Some(wns_val), Some(tns_val)) = (wns, tns) {
         Some(TimingMetrics {
             wns: wns_val,
@@ -626,10 +783,60 @@ fn parse_timing_report(lines: &[String]) -> Option<TimingMetrics> {
             whs: whs.unwrap_or(0.0),
             ths: ths.unwrap_or(0.0),
             failing_endpoints: failing,
+            clocks,
         })
     } else {
         None
     }
+}
+
+/// Parse a clock summary row: "sys_clk  {0.000 5.000}  10.000  100.000"
+/// Returns (clock_name, period_ns).
+fn parse_clock_summary_row(line: &str) -> Option<(String, f64)> {
+    let trimmed = line.trim();
+    // The clock name is the first token
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    let name = parts.next()?.to_string();
+    let rest = parts.next()?;
+
+    // Skip the waveform {x.xxx y.yyy} and find Period(ns)
+    // After the waveform, we have period and frequency
+    // Strategy: find all float-like tokens after the closing brace
+    if let Some(brace_end) = rest.rfind('}') {
+        let after_brace = &rest[brace_end + 1..];
+        let numbers: Vec<f64> = after_brace
+            .split_whitespace()
+            .filter_map(|s| s.parse::<f64>().ok())
+            .collect();
+        // First number is period, second is frequency
+        if !numbers.is_empty() {
+            return Some((name, numbers[0]));
+        }
+    }
+    None
+}
+
+/// Parse a per-clock timing row: "clk_sys  7.085  0.000  0  124"
+/// Returns (clock_name, wns/whs, tns/ths, failing, total).
+fn parse_clock_timing_row(line: &str) -> Option<(String, f64, f64, u32, u32)> {
+    let trimmed = line.trim();
+    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    if parts.len() < 5 {
+        return None;
+    }
+
+    // First part is clock name (non-numeric)
+    let name = parts[0];
+    if name.starts_with(|c: char| c.is_ascii_digit() || c == '-') {
+        return None; // Not a clock name
+    }
+
+    let wns: f64 = parts[1].parse().ok()?;
+    let tns: f64 = parts[2].parse().ok()?;
+    let failing: u32 = parts[3].parse().ok()?;
+    let total: u32 = parts[4].parse().ok()?;
+
+    Some((name.to_string(), wns, tns, failing, total))
 }
 
 /// Check if a line looks like a timing data row (starts with a number or negative number).
@@ -675,6 +882,9 @@ mod tests {
     fn test_phase_completion_with_time_memory() {
         let mut parser = VivadoOutputParser::new();
 
+        // Start phase so wall-clock timing begins
+        parser.parse_line("Starting synth_design");
+
         // Time line buffers completion data (not emitted yet)
         let events = parser.parse_line(
             "synth_design: Time (s): cpu = 00:00:20 ; elapsed = 00:00:27 . Memory (MB): peak = 1912.547",
@@ -685,7 +895,7 @@ mod tests {
         let events = parser.parse_line("synth_design completed successfully");
         assert_eq!(events.len(), 0);
 
-        // Flush emits the buffered event
+        // Flush emits the buffered event with wall-clock elapsed time
         let events = parser.flush();
         assert_eq!(events.len(), 1);
         match &events[0] {
@@ -695,7 +905,9 @@ mod tests {
                 memory_mb,
             } => {
                 assert_eq!(phase, "synthesis");
-                assert!((elapsed_secs - 27.0).abs() < 0.01);
+                // Wall-clock elapsed (will be small in tests, but must be >= 0)
+                assert!(*elapsed_secs >= 0.0);
+                // Memory is from Vivado's report
                 assert!((memory_mb - 1912.547).abs() < 0.01);
             }
             _ => panic!("Expected PhaseCompleted"),
@@ -706,13 +918,16 @@ mod tests {
     fn test_phase_completion_place() {
         let mut parser = VivadoOutputParser::new();
 
+        // Start phase so wall-clock timing begins
+        parser.parse_line("Command: place_design");
+
         // Time line buffers completion data
         let events = parser.parse_line(
             "place_design: Time (s): cpu = 00:00:01 ; elapsed = 00:00:01 . Memory (MB): peak = 2049.000",
         );
         assert_eq!(events.len(), 0);
 
-        // Flush emits the buffered event
+        // Flush emits the buffered event with wall-clock elapsed time
         let events = parser.flush();
         assert_eq!(events.len(), 1);
         match &events[0] {
@@ -722,7 +937,9 @@ mod tests {
                 memory_mb,
             } => {
                 assert_eq!(phase, "place");
-                assert!((elapsed_secs - 1.0).abs() < 0.01);
+                // Wall-clock elapsed (will be small in tests, but must be >= 0)
+                assert!(*elapsed_secs >= 0.0);
+                // Memory is from Vivado's report
                 assert!((memory_mb - 2049.0).abs() < 0.01);
             }
             _ => panic!("Expected PhaseCompleted"),
@@ -993,7 +1210,7 @@ mod tests {
             "Should defer to flush when pending exists"
         );
 
-        // Next phase start flushes with latest values
+        // Next phase start flushes — uses wall-clock elapsed, latest memory
         let events = parser.parse_line("Command: opt_design");
         let completed: Vec<_> = events
             .iter()
@@ -1004,13 +1221,14 @@ mod tests {
             BuildEvent::PhaseCompleted {
                 phase,
                 elapsed_secs,
+                memory_mb,
                 ..
             } => {
                 assert_eq!(phase, "synthesis");
-                assert!(
-                    (*elapsed_secs - 21.0).abs() < 0.01,
-                    "Should use latest Time value, not first"
-                );
+                // Wall-clock elapsed (small but non-negative in tests)
+                assert!(*elapsed_secs >= 0.0);
+                // Memory from latest Vivado Time line
+                assert!((*memory_mb - 1922.0).abs() < 0.01);
             }
             _ => panic!("Expected PhaseCompleted"),
         }
@@ -1136,5 +1354,162 @@ mod tests {
 
         // Check phases_completed
         assert_eq!(parser.phases_completed().len(), 5);
+    }
+
+    #[test]
+    fn test_clock_timing_parsing() {
+        let mut parser = VivadoOutputParser::new();
+
+        parser.parse_line("LOOM_MARKER:POST_ROUTE_TIMING_BEGIN");
+
+        // A realistic timing report with Clock Summary and Intra Clock Table
+        let timing_lines = [
+            "------------------------------------------------------------------------------------------------",
+            "| Design Timing Summary",
+            "| ---------------------",
+            "------------------------------------------------------------------------------------------------",
+            "",
+            "    WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints",
+            "    -------      -------  ---------------------  -------------------",
+            "      7.085        0.000                      0                  124",
+            "",
+            "",
+            "    WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints",
+            "    -------      -------  ---------------------  -------------------",
+            "      0.308        0.000                      0                   98",
+            "",
+            "------------------------------------------------------------------------------------------------",
+            "| Clock Summary",
+            "| -------------",
+            "------------------------------------------------------------------------------------------------",
+            "",
+            "Clock        Waveform(ns)       Period(ns)      Frequency(MHz)",
+            "-----        ------------       ----------      --------------",
+            "sys_clk      {0.000 5.000}      10.000          100.000",
+            "clk_sys      {0.000 20.833}     41.667          24.000",
+            "",
+            "------------------------------------------------------------------------------------------------",
+            "| Intra Clock Table",
+            "| -----------------",
+            "------------------------------------------------------------------------------------------------",
+            "",
+            "Clock          WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints",
+            "-----          -------      -------  ---------------------  -------------------",
+            "clk_sys          7.085        0.000                      0                  124",
+            "",
+            "",
+            "Clock          WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints",
+            "-----          -------      -------  ---------------------  -------------------",
+            "clk_sys          0.308        0.000                      0                   98",
+        ];
+
+        for line in &timing_lines {
+            parser.parse_line(line);
+        }
+
+        let events = parser.parse_line("LOOM_MARKER:POST_ROUTE_TIMING_END");
+        assert_eq!(events.len(), 1);
+
+        match &events[0] {
+            BuildEvent::TimingAvailable { stage, timing } => {
+                assert_eq!(stage, "post_route");
+                // Design-level timing
+                assert!((timing.wns - 7.085).abs() < 0.001);
+                assert!((timing.whs - 0.308).abs() < 0.001);
+
+                // Per-clock timing
+                assert_eq!(timing.clocks.len(), 1, "Should have one clock (clk_sys)");
+
+                let clk = &timing.clocks[0];
+                assert_eq!(clk.name, "clk_sys");
+                assert!((clk.period_ns.unwrap() - 41.667).abs() < 0.01);
+                assert!((clk.frequency_mhz.unwrap() - 24.0).abs() < 0.1);
+                assert!((clk.wns - 7.085).abs() < 0.001);
+                assert!((clk.tns - 0.0).abs() < 0.001);
+                assert!((clk.whs - 0.308).abs() < 0.001);
+                assert_eq!(clk.failing_endpoints, 0);
+                assert_eq!(clk.total_endpoints, 124);
+
+                // Realized fmax: 1000 / (41.667 - 7.085) = 1000 / 34.582 ≈ 28.92 MHz
+                let achieved = clk.achieved_mhz.unwrap();
+                assert!(
+                    (achieved - 28.92).abs() < 0.1,
+                    "Achieved fmax should be ~28.92 MHz, got {}",
+                    achieved
+                );
+            }
+            _ => panic!("Expected TimingAvailable"),
+        }
+    }
+
+    #[test]
+    fn test_clock_timing_multi_clock() {
+        let mut parser = VivadoOutputParser::new();
+
+        parser.parse_line("LOOM_MARKER:POST_ROUTE_TIMING_BEGIN");
+
+        let timing_lines = [
+            "    WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints",
+            "    -------      -------  ---------------------  -------------------",
+            "      2.500        0.000                      0                  200",
+            "",
+            "    WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints",
+            "    -------      -------  ---------------------  -------------------",
+            "      0.100        0.000                      0                  180",
+            "",
+            "| Clock Summary",
+            "| -------------",
+            "",
+            "Clock        Waveform(ns)       Period(ns)      Frequency(MHz)",
+            "-----        ------------       ----------      --------------",
+            "clk_fast     {0.000 2.500}      5.000           200.000",
+            "clk_slow     {0.000 5.000}      10.000          100.000",
+            "",
+            "| Intra Clock Table",
+            "| -----------------",
+            "",
+            "Clock          WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints",
+            "-----          -------      -------  ---------------------  -------------------",
+            "clk_fast         2.500        0.000                      0                  100",
+            "clk_slow         5.000        0.000                      0                  100",
+            "",
+            "",
+            "Clock          WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints",
+            "-----          -------      -------  ---------------------  -------------------",
+            "clk_fast         0.100        0.000                      0                   90",
+            "clk_slow         0.200        0.000                      0                   90",
+        ];
+
+        for line in &timing_lines {
+            parser.parse_line(line);
+        }
+
+        let events = parser.parse_line("LOOM_MARKER:POST_ROUTE_TIMING_END");
+        assert_eq!(events.len(), 1);
+
+        match &events[0] {
+            BuildEvent::TimingAvailable { timing, .. } => {
+                assert_eq!(timing.clocks.len(), 2, "Should have two clocks");
+
+                // Sorted by name: clk_fast, clk_slow
+                let fast = &timing.clocks[0];
+                assert_eq!(fast.name, "clk_fast");
+                assert!((fast.period_ns.unwrap() - 5.0).abs() < 0.01);
+                assert!((fast.frequency_mhz.unwrap() - 200.0).abs() < 0.1);
+                assert!((fast.wns - 2.5).abs() < 0.001);
+                assert!((fast.whs - 0.1).abs() < 0.001);
+                // Achieved: 1000 / (5.0 - 2.5) = 400 MHz
+                assert!((fast.achieved_mhz.unwrap() - 400.0).abs() < 0.1);
+
+                let slow = &timing.clocks[1];
+                assert_eq!(slow.name, "clk_slow");
+                assert!((slow.period_ns.unwrap() - 10.0).abs() < 0.01);
+                assert!((slow.wns - 5.0).abs() < 0.001);
+                assert!((slow.whs - 0.2).abs() < 0.001);
+                // Achieved: 1000 / (10.0 - 5.0) = 200 MHz
+                assert!((slow.achieved_mhz.unwrap() - 200.0).abs() < 0.1);
+            }
+            _ => panic!("Expected TimingAvailable"),
+        }
     }
 }

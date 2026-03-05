@@ -340,7 +340,11 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
                 } else {
                     "Timing"
                 };
-                ui::timing_line(label, timing.wns, timing.whs, true);
+                let has_clocks = !timing.clocks.is_empty();
+                ui::timing_line(label, timing.wns, timing.whs, !has_clocks);
+                if has_clocks {
+                    ui::clock_table(&timing.clocks, true);
+                }
             }
         }
         BuildEvent::IntermediateTiming { .. } => {}

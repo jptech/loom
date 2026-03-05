@@ -144,6 +144,55 @@ pub fn timing_line(label: &str, wns: f64, whs: f64, is_last: bool) {
     );
 }
 
+// ── Clock table ─────────────────────────────────────────────────────
+
+/// Print a per-clock timing table with target/achieved fmax and slack values.
+pub fn clock_table(clocks: &[loom_core::build::report::ClockTiming], is_last: bool) {
+    if clocks.is_empty() {
+        return;
+    }
+    let prefix = if is_last { " " } else { TREE_VERT };
+    eprintln!(
+        "    {} {:<16} {:>10} {:>10}  {:>9}  {:>9}",
+        prefix,
+        "Clock".dimmed(),
+        "Target".dimmed(),
+        "Achieved".dimmed(),
+        "WNS".dimmed(),
+        "WHS".dimmed()
+    );
+    for (i, clk) in clocks.iter().enumerate() {
+        let is_last_clk = i == clocks.len() - 1;
+        let clk_prefix = if is_last_clk && is_last {
+            "\u{2514}"
+        } else {
+            "\u{251C}"
+        };
+        let target = clk
+            .frequency_mhz
+            .map(|f| format!("{:.1} MHz", f))
+            .unwrap_or_else(|| "\u{2014}".to_string());
+        let achieved = clk
+            .achieved_mhz
+            .map(|f| format!("{:.1} MHz", f))
+            .unwrap_or_else(|| "\u{2014}".to_string());
+        let wns_icon = if clk.wns >= 0.0 {
+            CHECK.green().to_string()
+        } else {
+            CROSS.red().to_string()
+        };
+        let whs_icon = if clk.whs >= 0.0 {
+            CHECK.green().to_string()
+        } else {
+            CROSS.red().to_string()
+        };
+        eprintln!(
+            "    {} {:<16} {:>10} {:>10}  {:>+7.3}ns {} {:>+7.3}ns {}",
+            clk_prefix, clk.name, target, achieved, clk.wns, wns_icon, clk.whs, whs_icon
+        );
+    }
+}
+
 // ── Spinner ──────────────────────────────────────────────────────────
 
 /// Create a spinner with custom tick chars and elapsed time display.

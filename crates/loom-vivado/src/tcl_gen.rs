@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use loom_core::assemble::fileset::{AssembledFilesets, ConstraintScope, FileLanguage};
 use loom_core::build::context::BuildContext;
+use loom_core::manifest::project::ReportConfig;
 use loom_core::resolve::resolver::ResolvedProject;
 
 /// Generate Vivado non-project-mode Tcl script.
@@ -90,40 +91,116 @@ pub fn generate_tcl(
         writeln!(script)?;
     }
 
+    // Extract report and checkpoint configuration
+    let report_cfg = context
+        .project
+        .project
+        .build
+        .as_ref()
+        .and_then(|b| b.reports.as_ref())
+        .cloned()
+        .unwrap_or_default();
+    let checkpoint_cfg = context
+        .project
+        .project
+        .build
+        .as_ref()
+        .and_then(|b| b.checkpoints.as_ref())
+        .cloned()
+        .unwrap_or_default();
+
+    let build_dir_tcl = to_tcl_path(&context.build_dir);
+
     // Synthesis
     writeln!(script, "# Synthesis")?;
     writeln!(script, "synth_design -top {} -part {}", top_module, part)?;
     writeln!(script)?;
 
-    // Post-synthesis utilization report
+    // Post-synthesis utilization report (stdout capture for live display)
     writeln!(script, "# Post-synthesis utilization")?;
     writeln!(script, "puts \"LOOM_MARKER:REPORT_UTIL_BEGIN\"")?;
     writeln!(script, "report_utilization -no_primitives")?;
     writeln!(script, "puts \"LOOM_MARKER:REPORT_UTIL_END\"")?;
     writeln!(script)?;
 
+    // Post-synthesis report files
+    write_report_files(&mut script, &report_cfg, &build_dir_tcl, "synth")?;
+
+    // Post-synthesis checkpoint
+    if checkpoint_cfg.post_synth() {
+        writeln!(
+            script,
+            "write_checkpoint -force {{{}/post_synth.dcp}}",
+            build_dir_tcl
+        )?;
+        writeln!(script)?;
+    }
+
     // Implementation
     writeln!(script, "# Implementation")?;
     writeln!(script, "opt_design")?;
+
+    // Post-opt checkpoint
+    if checkpoint_cfg.post_opt() {
+        writeln!(
+            script,
+            "write_checkpoint -force {{{}/post_opt.dcp}}",
+            build_dir_tcl
+        )?;
+    }
+
     writeln!(script, "place_design")?;
     writeln!(script)?;
 
-    // Post-placement timing estimate
+    // Post-placement timing estimate (stdout capture for live display)
     writeln!(script, "# Post-placement timing estimate")?;
     writeln!(script, "puts \"LOOM_MARKER:POST_PLACE_TIMING_BEGIN\"")?;
     writeln!(script, "report_timing_summary -no_header")?;
     writeln!(script, "puts \"LOOM_MARKER:POST_PLACE_TIMING_END\"")?;
     writeln!(script)?;
 
+    // Post-placement report files
+    if report_cfg.timing() {
+        writeln!(
+            script,
+            "report_timing_summary -file {{{}/timing_place.rpt}}",
+            build_dir_tcl
+        )?;
+        writeln!(script)?;
+    }
+
+    // Post-place checkpoint
+    if checkpoint_cfg.post_place() {
+        writeln!(
+            script,
+            "write_checkpoint -force {{{}/post_place.dcp}}",
+            build_dir_tcl
+        )?;
+        writeln!(script)?;
+    }
+
     writeln!(script, "route_design")?;
     writeln!(script)?;
 
-    // Post-route timing (final)
+    // Post-route timing (final, stdout capture for live display)
     writeln!(script, "# Post-route timing")?;
     writeln!(script, "puts \"LOOM_MARKER:POST_ROUTE_TIMING_BEGIN\"")?;
     writeln!(script, "report_timing_summary -no_header")?;
     writeln!(script, "puts \"LOOM_MARKER:POST_ROUTE_TIMING_END\"")?;
     writeln!(script)?;
+
+    // Post-route report files
+    write_report_files(&mut script, &report_cfg, &build_dir_tcl, "route")?;
+
+    // Post-route checkpoint
+    if checkpoint_cfg.post_route() {
+        writeln!(
+            script,
+            "write_checkpoint -force {{{}/post_route.dcp}}",
+            build_dir_tcl
+        )?;
+        writeln!(script)?;
+    }
 
     // Bitstream
     writeln!(script, "# Bitstream")?;
@@ -134,6 +211,47 @@ pub fn generate_tcl(
     )?;
 
     Ok(script)
+}
+
+/// Write report file commands based on the report configuration.
+fn write_report_files(
+    script: &mut String,
+    report_cfg: &ReportConfig,
+    build_dir_tcl: &str,
+    stage: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if report_cfg.utilization() {
+        writeln!(
+            script,
+            "report_utilization -file {{{}/utilization_{}.rpt}}",
+            build_dir_tcl, stage
+        )?;
+    }
+    if report_cfg.timing() {
+        writeln!(
+            script,
+            "report_timing_summary -file {{{}/timing_{}.rpt}}",
+            build_dir_tcl, stage
+        )?;
+    }
+    if report_cfg.power() {
+        writeln!(
+            script,
+            "report_power -file {{{}/power_{}.rpt}}",
+            build_dir_tcl, stage
+        )?;
+    }
+    if report_cfg.drc() {
+        writeln!(
+            script,
+            "report_drc -file {{{}/drc_{}.rpt}}",
+            build_dir_tcl, stage
+        )?;
+    }
+    if report_cfg.utilization() || report_cfg.timing() || report_cfg.power() || report_cfg.drc() {
+        writeln!(script)?;
+    }
+    Ok(())
 }
 
 /// Convert a path to Tcl-safe format (forward slashes, no Windows extended-length prefix).
@@ -374,9 +492,33 @@ mod tests {
             "Should have post-route timing marker end"
         );
 
-        // Timing summary commands
+        // Timing summary commands: 2 for stdout capture + 3 file reports (synth, place, route)
         let timing_count = script.matches("report_timing_summary").count();
-        assert_eq!(timing_count, 2, "Should have two timing summary commands");
+        assert_eq!(
+            timing_count, 5,
+            "Should have 5 timing summary commands (2 stdout + 3 file)"
+        );
+
+        // Report file commands (default config: utilization + timing enabled)
+        assert!(
+            script.contains("report_utilization -file"),
+            "Should have utilization file report"
+        );
+        assert!(
+            script.contains("report_timing_summary -file"),
+            "Should have timing file report"
+        );
+
+        // Default config: checkpoints for post_place and post_route
+        assert!(
+            script.contains("write_checkpoint -force"),
+            "Should have checkpoint commands"
+        );
+        let checkpoint_count = script.matches("write_checkpoint").count();
+        assert_eq!(
+            checkpoint_count, 2,
+            "Default config: post_place + post_route checkpoints"
+        );
     }
 
     #[test]
