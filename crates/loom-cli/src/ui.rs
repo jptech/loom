@@ -40,13 +40,15 @@ impl Icon {
 
 // ── Header ───────────────────────────────────────────────────────────
 
-/// Print a styled header line:  `  loom v0.1.0 · part1 → part2 · part3`
+/// Print a styled header line:  `  loom v0.1.0 (abc1234) · part1 → part2 · part3`
 pub fn header(parts: &[(&str, &str)]) {
     let version = env!("CARGO_PKG_VERSION");
+    let git_hash = env!("LOOM_GIT_HASH");
     let mut line = format!(
-        "  {} {}",
+        "  {} {} {}",
         "loom".cyan().bold(),
-        format!("v{}", version).dimmed()
+        format!("v{}", version).dimmed(),
+        format!("({})", git_hash).dimmed()
     );
     for (sep, value) in parts {
         line.push_str(&format!(" {} {}", sep.dimmed(), value.bold()));
