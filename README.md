@@ -275,6 +275,7 @@ version = "2023.2"
 | `loom new platform` | Scaffold a new platform definition |
 | `loom ip list` | List all IP instances across the workspace |
 | `loom ip upgrade` | Check for IP version upgrades |
+| `loom status` | Show project dashboard (deps, files, last build summary) |
 | `loom report` | Show the last build report |
 | `loom lsp` | Export LSP configuration for editor integration |
 | `loom migrate xci-to-toml` | Convert Vivado `.xci` files to TOML generator config |

@@ -14,13 +14,13 @@ This directory contains the actionable implementation plans for building the Loo
 
 | Phase | Goal | Tasks | Status |
 |---|---|---|---|
-| **Phase 1** | End-to-end build: manifests → Vivado → bitstream | 15 | Not started |
-| **Phase 2** | Generators, caching, CLI polish, Windows | 15 | Not started |
-| **Phase 3** | Platforms, variants, profiles, OOC synthesis | 6 | Not started |
-| **Phase 4** | Reporting, CI, hooks, Quartus backend | 8 | Not started |
-| **Phase 5** | Simulation, yosys backend, strategy sweeps | 8 | Not started |
-| **Phase 6** | Test organization (design + implement) | 5 | Not started |
-| **Phase 7** | Ecosystem, registry, additional backends | 5 | Not started |
+| **Phase 1** | End-to-end build: manifests → Vivado → bitstream | 15 | Complete |
+| **Phase 2** | Generators, caching, CLI polish, Windows | 15 | Complete |
+| **Phase 3** | Platforms, variants, profiles, OOC synthesis | 6 | Complete |
+| **Phase 4** | Reporting, CI, hooks, Quartus backend | 8 | Complete |
+| **Phase 5** | Simulation, yosys backend, strategy sweeps | 8 | Complete |
+| **Phase 6** | Test organization (design + implement) | 5 | Complete |
+| **Phase 7** | Ecosystem, registry, additional backends | 5 | Complete |
 
 ## Repository Layout (Target)
 

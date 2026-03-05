@@ -31,20 +31,35 @@ Three-layer design (see `system_plan.md` §2):
 crates/
 ├── loom-cli/       # Binary. CLI entry point (clap derive). One module per command in commands/.
 ├── loom-core/      # Library. All framework logic:
-│   ├── manifest/   #   TOML parsing: component.rs, project.rs, workspace.rs, common.rs
-│   ├── resolve/    #   Dep resolution: resolver.rs, lockfile.rs, graph.rs
-│   ├── assemble/   #   File-set assembly: fileset.rs, ordering.rs
-│   ├── build/      #   Pipeline: pipeline.rs, validate.rs, context.rs
-│   ├── plugin/     #   Trait definitions: backend.rs, generator.rs
+│   ├── manifest/   #   TOML parsing: component.rs, project.rs, workspace.rs, platform.rs,
+│   │               #                 generator.rs, test.rs, common.rs, mod.rs
+│   ├── resolve/    #   Dep resolution: resolver.rs, lockfile.rs, graph.rs,
+│   │               #                  workspace.rs, platform.rs, registry.rs
+│   ├── assemble/   #   File-set assembly: fileset.rs, ordering.rs, template.rs
+│   ├── generate/   #   Code gen: dag.rs, node.rs, cache.rs, execute.rs, plugins/
+│   ├── build/      #   Pipeline: pipeline.rs, validate.rs, context.rs,
+│   │               #             checkpoint.rs, hooks.rs, report.rs, progress.rs
+│   ├── plugin/     #   Trait definitions: backend.rs, simulator.rs, generator.rs,
+│   │               #                      reporter.rs, mod.rs
+│   ├── util.rs
 │   └── error.rs    #   LoomError enum, exit code mapping
-└── loom-vivado/    # Library. Vivado backend: tcl_gen.rs, executor.rs, env_check.rs
+├── loom-vivado/    # Library. Vivado backend: tcl_gen.rs, executor.rs, env_check.rs, ooc.rs
+├── loom-quartus/   # Library. Quartus backend: tcl_gen.rs, executor.rs, env_check.rs
+├── loom-yosys/     # Library. yosys+nextpnr backend: synth.rs, pnr.rs, pack.rs, env_check.rs
+├── loom-radiant/   # Library. Lattice Radiant backend: tcl_gen.rs, executor.rs, env_check.rs
+├── loom-xsim/      # Library. Vivado Simulator: compile.rs, elaborate.rs, simulate.rs, env_check.rs
+├── loom-verilator/ # Library. Verilator simulator: env_check.rs
+├── loom-icarus/    # Library. Icarus Verilog simulator: env_check.rs
+├── loom-questa/    # Library. Siemens Questa simulator: env_check.rs
+├── loom-vcs/       # Library. Synopsys VCS simulator: env_check.rs
+└── loom-xcelium/   # Library. Cadence Xcelium simulator: env_check.rs
 ```
 
-### Build Pipeline (Phase 1)
+### Build Pipeline
 
-Linear flow, no DAG: `RESOLVE → ASSEMBLE → VALIDATE → BUILD`
+Full pipeline: `RESOLVE → GENERATE → ASSEMBLE → VALIDATE → BUILD → REPORT`
 
-Manifests (`component.toml`, `project.toml`, `workspace.toml`) → dependency resolution → lockfile → file-set assembly → Vivado Tcl generation → `vivado -mode batch` → exit code.
+Manifests (`component.toml`, `project.toml`, `workspace.toml`) → dependency resolution → lockfile → code generators (DAG) → file-set assembly → backend script generation → tool execution → metrics/report.
 
 ## Spec Conventions
 
@@ -57,7 +72,7 @@ Manifests (`component.toml`, `project.toml`, `workspace.toml`) → dependency re
 
 ### Phase Boundaries
 
-Phase 1 explicitly excludes: generators, platforms, profiles, variants, OOC synthesis, Python plugin loading, metrics extraction, constraint templating, `--resume`/`--stop-after`/`--dry-run`. The `-j` flag is parsed but ignored.
+All 7 phases are implemented. The `-j` flag is parsed but ignored (parallelism not yet wired up).
 
 ### Manifests
 
@@ -93,4 +108,4 @@ Non-project-mode batch execution. The generated Tcl must handle:
 
 Follow `plans/README.md` for implementation order. Within a phase, tasks are numbered and must be done in order. Each task file has "Done when" acceptance criteria — verify before moving on.
 
-Current focus: Phase 1 (15 tasks in `plans/phase-1/`).
+All phases complete. See `plans/README.md` for the full phase breakdown.
