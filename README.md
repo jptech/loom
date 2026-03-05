@@ -1,13 +1,46 @@
-# Loom
+<p align="center">
+  <img src="docs/images/loom-logo-whitebg.png" alt="Loom FPGA Build System" width="280">
+</p>
 
-Loom is a build system for FPGA projects. It manages multi-component workspaces, resolves dependencies, assembles filesets, and drives vendor toolchains (Vivado, Quartus, yosys/nextpnr, Radiant) through a unified CLI.
+<h1 align="center">Loom</h1>
 
-## Key ideas
+<p align="center">
+  <strong>Declarative, vendor-agnostic build system for FPGA projects</strong>
+</p>
 
-- **Declarative manifests** — TOML files (`component.toml`, `project.toml`, `workspace.toml`) describe your design; Loom figures out the rest.
-- **Workspace-native** — First-class support for monorepos with shared IP libraries and multiple target projects.
-- **Vendor-agnostic core** — One project structure works across Xilinx, Intel, Lattice, and open-source toolchains.
-- **Deterministic builds** — Lockfile pins exact dependency versions. Cache keys track inputs so generators only re-run when needed.
+<p align="center">
+  <a href="https://github.com/jptech/loom/actions/workflows/ci.yml"><img src="https://github.com/jptech/loom/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <a href="https://github.com/jptech/loom"><img src="https://img.shields.io/badge/rust-2021_edition-orange.svg" alt="Rust 2021"></a>
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick Start</a> &middot;
+  <a href="#manifest-reference">Manifest Reference</a> &middot;
+  <a href="#cli-commands">CLI Commands</a> &middot;
+  <a href="docs/ARCHITECTURE.md">Architecture</a>
+</p>
+
+---
+
+Loom replaces ad-hoc Tcl scripts and Makefiles with TOML manifests, a dependency resolver, and a single CLI that drives Vivado, Quartus, yosys/nextpnr, and Radiant.
+
+## Why Loom?
+
+- **Declarative manifests** -- TOML files (`component.toml`, `project.toml`, `workspace.toml`) describe your design; Loom figures out the rest.
+- **Workspace-native** -- First-class support for monorepos with shared IP libraries and multiple target projects.
+- **Vendor-agnostic core** -- One project structure works across AMD/Xilinx, Intel, Lattice, and open-source toolchains.
+- **Deterministic builds** -- Lockfile pins exact dependency versions. Cache keys track inputs so generators only re-run when needed.
+
+## Installation
+
+Loom requires Rust 1.70+. Build and install from source:
+
+```bash
+git clone https://github.com/jptech/loom.git
+cd loom
+cargo install --path crates/loom-cli
+```
 
 ## Quick start
 
@@ -34,7 +67,7 @@ loom sim --tool verilator
 
 ## Project structure
 
-A typical Loom workspace looks like this:
+A typical Loom workspace:
 
 ```
 my_fpga/
@@ -161,7 +194,7 @@ plusargs = ["VERBOSE"]
 
 ### project.toml
 
-Defines a build target — which top module, FPGA part, and backend to use.
+Defines a build target -- which top module, FPGA part, and backend to use.
 
 ```toml
 [project]
@@ -313,15 +346,15 @@ loom sim [OPTIONS]
 Loom executes a linear build pipeline:
 
 ```
-RESOLVE → GENERATE → ASSEMBLE → VALIDATE → BUILD → REPORT
+RESOLVE -> GENERATE -> ASSEMBLE -> VALIDATE -> BUILD -> REPORT
 ```
 
-1. **Resolve** — Walk workspace, parse manifests, resolve dependencies, check lockfile.
-2. **Generate** — Run code generators (register maps, IP cores, block designs).
-3. **Assemble** — Collect HDL files and constraints in dependency order.
-4. **Validate** — Check that all referenced files exist and the tool environment is ready.
-5. **Build** — Generate backend-specific scripts (Tcl, yosys commands) and execute.
-6. **Report** — Extract metrics, write build report, return exit code.
+1. **Resolve** -- Walk workspace, parse manifests, resolve dependencies, check lockfile.
+2. **Generate** -- Run code generators (register maps, IP cores, block designs).
+3. **Assemble** -- Collect HDL files and constraints in dependency order.
+4. **Validate** -- Check that all referenced files exist and the tool environment is ready.
+5. **Build** -- Generate backend-specific scripts (Tcl, yosys commands) and execute.
+6. **Report** -- Extract metrics, write build report, return exit code.
 
 ## Exit codes
 
@@ -337,13 +370,13 @@ RESOLVE → GENERATE → ASSEMBLE → VALIDATE → BUILD → REPORT
 
 ```bash
 cargo build                    # Build all crates
-cargo test                     # Run all tests (184 tests)
+cargo test                     # Run all tests
 cargo clippy -- -D warnings    # Lint
 cargo fmt                      # Format
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for internal architecture details.
+See [Architecture](docs/ARCHITECTURE.md) for internal design details.
 
 ## License
 
-See LICENSE file for details.
+Loom is distributed under the [MIT License](LICENSE).
