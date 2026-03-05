@@ -1,7 +1,8 @@
 [package]
 name = "loom-verilator"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+license.workspace = true
 
 [dependencies]
 loom-core = { path = "../loom-core" }
