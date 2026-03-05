@@ -3,6 +3,7 @@ use clap::Args;
 use loom_core::error::LoomError;
 use loom_core::plugin::simulator::{SimOptions, SimulatorPlugin};
 
+use crate::ui::{self, Icon};
 use crate::GlobalContext;
 
 #[derive(Args)]
@@ -94,22 +95,24 @@ pub fn run(args: SimArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     };
 
     if !ctx.quiet {
-        eprintln!(
-            "  Simulating with {} (top: {})...",
-            simulator.plugin_name(),
-            top_module
-        );
+        ui::header(&[
+            ("\u{00B7}", "sim"),
+            ("\u{00B7}", simulator.plugin_name()),
+            ("\u{00B7}", &format!("top: {}", top_module)),
+        ]);
     }
 
     // Step 1: Compile
     if !ctx.quiet {
-        eprintln!("  Compiling...");
+        ui::status(Icon::Dot, "Compile", "");
     }
     let compile_result = simulator.compile(&filesets, &options, &build_context)?;
     if !compile_result.success {
-        eprintln!("  Compilation failed:");
-        for err in &compile_result.errors {
-            eprintln!("    {}", err);
+        if !ctx.quiet {
+            ui::status(Icon::Cross, "Compile", "failed");
+            for err in &compile_result.errors {
+                ui::sub_item(err, false);
+            }
         }
         return Err(LoomError::BuildFailed {
             phase: "compile".to_string(),
@@ -119,14 +122,16 @@ pub fn run(args: SimArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
 
     // Step 2: Elaborate
     if !ctx.quiet {
-        eprintln!("  Elaborating...");
+        ui::status(Icon::Dot, "Elaborate", "");
     }
     let elaborate_result =
         simulator.elaborate(&compile_result, &top_module, &options, &build_context)?;
     if !elaborate_result.success {
-        eprintln!("  Elaboration failed:");
-        for err in &elaborate_result.errors {
-            eprintln!("    {}", err);
+        if !ctx.quiet {
+            ui::status(Icon::Cross, "Elaborate", "failed");
+            for err in &elaborate_result.errors {
+                ui::sub_item(err, false);
+            }
         }
         return Err(LoomError::BuildFailed {
             phase: "elaborate".to_string(),
@@ -136,7 +141,7 @@ pub fn run(args: SimArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
 
     // Step 3: Simulate
     if !ctx.quiet {
-        eprintln!("  Running simulation...");
+        ui::status(Icon::Dot, "Simulate", "");
     }
     let sim_result = simulator.simulate(&elaborate_result, &options, &build_context)?;
 
@@ -148,17 +153,20 @@ pub fn run(args: SimArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
             "{}",
             serde_json::to_string_pretty(&report).unwrap_or_default()
         );
-    } else {
-        let status = if report.passed { "PASSED" } else { "FAILED" };
-        eprintln!("  Simulation {}: {:.1}s", status, report.duration_secs);
-        if report.error_count > 0 {
-            eprintln!("  Errors: {}", report.error_count);
-        }
     }
 
     if report.passed {
+        if !ctx.quiet {
+            ui::summary_pass("Simulation passed", Some(report.duration_secs));
+        }
         Ok(())
     } else {
+        if !ctx.quiet {
+            ui::summary_fail(
+                "Simulation failed",
+                &format!("{} errors", report.error_count),
+            );
+        }
         Err(LoomError::BuildFailed {
             phase: "simulate".to_string(),
             log_path: sim_result.log_path.clone(),
@@ -189,13 +197,20 @@ fn run_check_compat(
     _ctx: &GlobalContext,
 ) -> Result<(), LoomError> {
     let caps = simulator.capabilities();
-    println!("Simulator: {}", simulator.plugin_name());
-    println!("  SystemVerilog: {}", caps.systemverilog_full);
-    println!("  VHDL:          {}", caps.vhdl);
-    println!("  UVM:           {}", caps.uvm);
-    println!("  fork/join:     {}", caps.fork_join);
-    println!("  force/release: {}", caps.force_release);
-    println!("  Coverage:      {}", caps.code_coverage);
-    println!("  Model:         {}", caps.compilation_model);
+    ui::section_header(&format!("Simulator: {}", simulator.plugin_name()));
+    let check = |supported: bool| -> Icon {
+        if supported {
+            Icon::Check
+        } else {
+            Icon::Cross
+        }
+    };
+    ui::status(check(caps.systemverilog_full), "SystemVerilog", "");
+    ui::status(check(caps.vhdl), "VHDL", "");
+    ui::status(check(caps.uvm), "UVM", "");
+    ui::status(check(caps.fork_join), "fork/join", "");
+    ui::status(check(caps.force_release), "force/release", "");
+    ui::status(check(caps.code_coverage), "Coverage", "");
+    ui::detail_line("Model", &caps.compilation_model);
     Ok(())
 }

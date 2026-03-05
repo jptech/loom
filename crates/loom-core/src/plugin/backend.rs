@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::assemble::fileset::AssembledFilesets;
 use crate::build::context::BuildContext;
+use crate::build::progress::BuildEvent;
 use crate::error::LoomError;
 use crate::resolve::resolver::ResolvedProject;
 
@@ -127,6 +128,7 @@ pub trait BackendPlugin: Send + Sync {
         &self,
         scripts: &[PathBuf],
         context: &BuildContext,
+        progress: Option<&(dyn Fn(BuildEvent) + Send + Sync)>,
     ) -> Result<BuildResult, LoomError>;
 
     /// Resume a build from a checkpoint file.

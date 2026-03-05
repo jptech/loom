@@ -1,0 +1,9 @@
+[component]
+name = "demo/uart"
+version = "1.0.0"
+description = "UART TX/RX with CDC synchronizer"
+
+[filesets.synth]
+files = ["rtl/cdc_sync.sv", "rtl/uart_rx.sv", "rtl/uart_tx.sv"]
+constraints = ["constraints/uart_cdc.xdc"]
+constraint_scope = "global"

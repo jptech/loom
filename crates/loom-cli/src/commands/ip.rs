@@ -4,6 +4,7 @@ use loom_core::error::LoomError;
 use loom_core::manifest::GeneratorDecl;
 use loom_core::resolve::{discover_members, find_workspace_root, load_all_components, MemberKind};
 
+use crate::ui::{self, Icon};
 use crate::GlobalContext;
 
 #[derive(Subcommand)]
@@ -78,7 +79,11 @@ fn run_list(_args: IpListArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
 
     if ip_instances.is_empty() {
         if !ctx.quiet {
-            eprintln!("  No vivado_ip generators found in workspace.");
+            ui::status(
+                Icon::Dot,
+                "IP",
+                "no vivado_ip generators found in workspace",
+            );
         }
         return Ok(());
     }
@@ -105,7 +110,7 @@ fn run_list(_args: IpListArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
             serde_json::to_string_pretty(&items).unwrap_or_default()
         );
     } else {
-        eprintln!("  IP instances in workspace:");
+        ui::section_header("IP instances");
         for (source, gen) in &ip_instances {
             let vlnv = gen
                 .config
@@ -113,7 +118,11 @@ fn run_list(_args: IpListArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
                 .and_then(|c| c.get("vlnv"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
-            eprintln!("    {} ({}) — {}", gen.name, vlnv, source);
+            ui::status(
+                Icon::Dot,
+                &gen.name,
+                &format!("({}) \u{2014} {}", vlnv, source),
+            );
         }
     }
 
@@ -170,7 +179,7 @@ fn run_upgrade(args: IpUpgradeArgs, ctx: &GlobalContext) -> Result<(), LoomError
 
     if ip_instances.is_empty() {
         if !ctx.quiet {
-            eprintln!("  No vivado_ip generators found.");
+            ui::status(Icon::Dot, "IP", "no vivado_ip generators found");
         }
         return Ok(());
     }
@@ -179,19 +188,19 @@ fn run_upgrade(args: IpUpgradeArgs, ctx: &GlobalContext) -> Result<(), LoomError
     // Full upgrade check requires Vivado's get_ipdefs command
     if !ctx.quiet {
         if let Some(ref ver) = args.tool_version {
-            eprintln!("  Checking IP upgrades for Vivado {} ...", ver);
-        }
-        eprintln!();
-        for (name, vlnv, _source) in &ip_instances {
-            eprintln!(
-                "  {}: {} (unchanged — Vivado not available for version query)",
-                name, vlnv
+            ui::status(
+                Icon::Dot,
+                "Upgrade",
+                &format!("checking for Vivado {}", ver),
             );
         }
-        eprintln!();
-        eprintln!("  Note: Full IP upgrade requires Vivado on PATH to query available versions.");
+        for (name, vlnv, _source) in &ip_instances {
+            ui::status(Icon::Dot, name, &format!("{} (unchanged)", vlnv));
+        }
+        ui::blank();
+        ui::sub_warning("Full IP upgrade requires Vivado on PATH to query available versions.");
         if args.apply {
-            eprintln!("  --apply: No changes to apply (no upgrades detected).");
+            ui::status(Icon::Dot, "Apply", "no changes to apply");
         }
     }
 

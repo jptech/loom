@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use loom_core::assemble::fileset::AssembledFilesets;
 use loom_core::build::context::BuildContext;
+use loom_core::build::progress::BuildEvent;
 use loom_core::error::LoomError;
 use loom_core::plugin::backend::{
     BackendCapabilities, BackendPlugin, BuildResult, Diagnostic, EnvironmentStatus,
@@ -74,7 +75,8 @@ impl BackendPlugin for VivadoBackend {
         &self,
         scripts: &[PathBuf],
         context: &BuildContext,
+        progress: Option<&(dyn Fn(BuildEvent) + Send + Sync)>,
     ) -> Result<BuildResult, LoomError> {
-        executor::run_vivado_batch(scripts, context)
+        executor::run_vivado_batch_with_progress(scripts, context, progress)
     }
 }

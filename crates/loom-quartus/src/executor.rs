@@ -1,6 +1,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::Ordering;
 
 use loom_core::build::context::BuildContext;
 use loom_core::error::LoomError;
@@ -29,9 +30,35 @@ pub fn run_quartus_batch(
     let mut last_result: Option<BuildResult> = None;
 
     for script in scripts {
+        // Check cancellation before starting next script
+        if context.cancelled.load(Ordering::Relaxed) {
+            return Ok(BuildResult {
+                success: false,
+                exit_code: 130,
+                log_paths: vec![log_path],
+                bitstream_path: None,
+                phases_completed: all_phases_completed,
+                failure_phase: Some("interrupted".to_string()),
+                failure_message: Some("Build interrupted by user".to_string()),
+            });
+        }
+
         let result = run_single_script(&quartus_path, script, &log_path, context)?;
 
         all_phases_completed.extend(result.phases_completed.clone());
+
+        if result.failure_phase.as_deref() == Some("interrupted") {
+            return Ok(BuildResult {
+                success: false,
+                exit_code: 130,
+                log_paths: result.log_paths,
+                bitstream_path: None,
+                phases_completed: all_phases_completed,
+                failure_phase: Some("interrupted".to_string()),
+                failure_message: Some("Build interrupted by user".to_string()),
+            });
+        }
+
         let success = result.success;
         last_result = Some(result);
 
@@ -94,17 +121,56 @@ fn run_single_script(
     let stdout = child.stdout.take().expect("stdout piped");
     let stderr = child.stderr.take().expect("stderr piped");
 
-    let stdout_lines =
-        collect_and_log_output(stdout, &mut log_writer, "OUT").map_err(|e| LoomError::Io {
+    // Read stderr on a separate thread to avoid deadlock when pipe buffers fill.
+    let stderr_handle = std::thread::spawn(move || -> std::io::Result<Vec<String>> {
+        let mut lines = Vec::new();
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            lines.push(line?);
+        }
+        Ok(lines)
+    });
+
+    let (stdout_lines, was_cancelled) =
+        collect_and_log_output(stdout, &mut log_writer, "OUT", &context.cancelled).map_err(
+            |e| LoomError::Io {
+                path: log_path.to_owned(),
+                source: e,
+            },
+        )?;
+
+    if was_cancelled {
+        let _ = child.kill();
+        let _ = child.wait();
+
+        let phases_completed = detect_completed_phases(&stdout_lines);
+
+        return Ok(BuildResult {
+            success: false,
+            exit_code: 130,
+            log_paths: vec![log_path.to_owned()],
+            bitstream_path: None,
+            phases_completed,
+            failure_phase: Some("interrupted".to_string()),
+            failure_message: Some("Build interrupted by user".to_string()),
+        });
+    }
+
+    let stderr_lines = stderr_handle
+        .join()
+        .map_err(|_| LoomError::Internal("stderr reader thread panicked".to_string()))?
+        .map_err(|e| LoomError::Io {
             path: log_path.to_owned(),
             source: e,
         })?;
 
-    let stderr_lines =
-        collect_and_log_output(stderr, &mut log_writer, "ERR").map_err(|e| LoomError::Io {
+    // Log collected stderr lines
+    for line in &stderr_lines {
+        writeln!(log_writer, "[ERR] {}", line).map_err(|e| LoomError::Io {
             path: log_path.to_owned(),
             source: e,
         })?;
+    }
 
     let status = child.wait().map_err(|e| LoomError::Io {
         path: log_path.to_owned(),
@@ -141,15 +207,22 @@ fn collect_and_log_output<R: std::io::Read>(
     reader: R,
     log: &mut impl Write,
     prefix: &str,
-) -> std::io::Result<Vec<String>> {
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> std::io::Result<(Vec<String>, bool)> {
     let mut lines = Vec::new();
+    let mut was_cancelled = false;
     let reader = BufReader::new(reader);
     for line in reader.lines() {
         let line = line?;
         writeln!(log, "[{}] {}", prefix, line)?;
         lines.push(line);
+
+        if cancelled.load(Ordering::Relaxed) {
+            was_cancelled = true;
+            break;
+        }
     }
-    Ok(lines)
+    Ok((lines, was_cancelled))
 }
 
 /// Find the quartus_sh executable.

@@ -32,7 +32,7 @@ pub fn generate_radiant_tcl(
     // Add source files
     tcl.push_str("# Source files\n");
     for file in &filesets.synth_files {
-        let path = file.path.display().to_string().replace('\\', "/");
+        let path = loom_core::util::to_tool_path(&file.path);
         match file.language {
             FileLanguage::Vhdl => {
                 tcl.push_str(&format!("prj_src add -format VHDL \"{}\"\n", path));
@@ -49,7 +49,7 @@ pub fn generate_radiant_tcl(
     // Add constraint files
     tcl.push_str("\n# Constraints\n");
     for constraint in &filesets.constraint_files {
-        let path = constraint.path.display().to_string().replace('\\', "/");
+        let path = loom_core::util::to_tool_path(&constraint.path);
         tcl.push_str(&format!("prj_src add -format PDC \"{}\"\n", path));
     }
 

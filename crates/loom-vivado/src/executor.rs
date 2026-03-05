@@ -1,15 +1,28 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::Ordering;
 
 use loom_core::build::context::BuildContext;
+use loom_core::build::progress::{BuildEvent, VivadoOutputParser};
 use loom_core::error::LoomError;
 use loom_core::plugin::backend::BuildResult;
+
+use crate::env_check;
 
 /// Run Vivado in batch mode, executing the given Tcl scripts.
 pub fn run_vivado_batch(
     scripts: &[PathBuf],
     context: &BuildContext,
+) -> Result<BuildResult, LoomError> {
+    run_vivado_batch_with_progress(scripts, context, None)
+}
+
+/// Run Vivado in batch mode with an optional progress callback.
+pub fn run_vivado_batch_with_progress(
+    scripts: &[PathBuf],
+    context: &BuildContext,
+    progress: Option<&(dyn Fn(BuildEvent) + Send + Sync)>,
 ) -> Result<BuildResult, LoomError> {
     if scripts.is_empty() {
         return Err(LoomError::Internal(
@@ -23,15 +36,41 @@ pub fn run_vivado_batch(
     })?;
 
     let log_path = context.build_dir.join("build.log");
-    let vivado_path = find_vivado_executable()?;
+    let vivado_path = env_check::find_vivado_executable()?;
 
     let mut all_phases_completed = Vec::new();
     let mut last_result: Option<BuildResult> = None;
 
     for script in scripts {
-        let result = run_single_script(&vivado_path, script, &log_path, context)?;
+        // Check cancellation before starting next script
+        if context.cancelled.load(Ordering::Relaxed) {
+            return Ok(BuildResult {
+                success: false,
+                exit_code: 130,
+                log_paths: vec![log_path],
+                bitstream_path: None,
+                phases_completed: all_phases_completed,
+                failure_phase: Some("interrupted".to_string()),
+                failure_message: Some("Build interrupted by user".to_string()),
+            });
+        }
+
+        let result = run_single_script(&vivado_path, script, &log_path, context, progress)?;
 
         all_phases_completed.extend(result.phases_completed.clone());
+
+        if result.failure_phase.as_deref() == Some("interrupted") {
+            return Ok(BuildResult {
+                success: false,
+                exit_code: 130,
+                log_paths: result.log_paths,
+                bitstream_path: None,
+                phases_completed: all_phases_completed,
+                failure_phase: Some("interrupted".to_string()),
+                failure_message: Some("Build interrupted by user".to_string()),
+            });
+        }
+
         let success = result.success;
         last_result = Some(result);
 
@@ -56,6 +95,7 @@ fn run_single_script(
     script: &Path,
     log_path: &Path,
     context: &BuildContext,
+    progress: Option<&(dyn Fn(BuildEvent) + Send + Sync)>,
 ) -> Result<BuildResult, LoomError> {
     let log_file = std::fs::File::create(log_path).map_err(|e| LoomError::Io {
         path: log_path.to_owned(),
@@ -101,17 +141,67 @@ fn run_single_script(
     let stdout = child.stdout.take().expect("stdout piped");
     let stderr = child.stderr.take().expect("stderr piped");
 
-    let stdout_lines =
-        collect_and_log_output(stdout, &mut log_writer, "OUT").map_err(|e| LoomError::Io {
+    // Read stderr on a separate thread to avoid deadlock when pipe buffers fill.
+    let stderr_handle = std::thread::spawn(move || -> std::io::Result<Vec<String>> {
+        let mut lines = Vec::new();
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            lines.push(line?);
+        }
+        Ok(lines)
+    });
+
+    let mut parser = VivadoOutputParser::new();
+    let (stdout_lines, was_cancelled) = collect_and_log_output_with_progress(
+        stdout,
+        &mut log_writer,
+        "OUT",
+        &mut parser,
+        progress,
+        &context.cancelled,
+    )
+    .map_err(|e| LoomError::Io {
+        path: log_path.to_owned(),
+        source: e,
+    })?;
+
+    if was_cancelled {
+        // Kill the child process and collect what we have
+        let _ = child.kill();
+        let _ = child.wait();
+
+        let phases_completed = if !parser.phases_completed().is_empty() {
+            parser.phases_completed().to_vec()
+        } else {
+            detect_completed_phases(&stdout_lines)
+        };
+
+        return Ok(BuildResult {
+            success: false,
+            exit_code: 130,
+            log_paths: vec![log_path.to_owned()],
+            bitstream_path: None,
+            phases_completed,
+            failure_phase: Some("interrupted".to_string()),
+            failure_message: Some("Build interrupted by user".to_string()),
+        });
+    }
+
+    let stderr_lines = stderr_handle
+        .join()
+        .map_err(|_| LoomError::Internal("stderr reader thread panicked".to_string()))?
+        .map_err(|e| LoomError::Io {
             path: log_path.to_owned(),
             source: e,
         })?;
 
-    let stderr_lines =
-        collect_and_log_output(stderr, &mut log_writer, "ERR").map_err(|e| LoomError::Io {
+    // Log collected stderr lines
+    for line in &stderr_lines {
+        writeln!(log_writer, "[ERR] {}", line).map_err(|e| LoomError::Io {
             path: log_path.to_owned(),
             source: e,
         })?;
+    }
 
     let status = child.wait().map_err(|e| LoomError::Io {
         path: log_path.to_owned(),
@@ -122,7 +212,12 @@ fn run_single_script(
     let success = exit_code == 0;
 
     let bitstream_path = detect_bitstream_path(&stdout_lines);
-    let phases_completed = detect_completed_phases(&stdout_lines);
+    // Use phases from parser if available, fall back to post-hoc detection
+    let phases_completed = if !parser.phases_completed().is_empty() {
+        parser.phases_completed().to_vec()
+    } else {
+        detect_completed_phases(&stdout_lines)
+    };
     let failure_phase = if !success {
         detect_failure_phase(&stdout_lines, &stderr_lines)
     } else {
@@ -144,138 +239,52 @@ fn run_single_script(
     })
 }
 
-fn collect_and_log_output<R: std::io::Read>(
+fn collect_and_log_output_with_progress<R: std::io::Read>(
     reader: R,
     log: &mut impl Write,
     prefix: &str,
-) -> std::io::Result<Vec<String>> {
+    parser: &mut VivadoOutputParser,
+    progress: Option<&(dyn Fn(BuildEvent) + Send + Sync)>,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> std::io::Result<(Vec<String>, bool)> {
     let mut lines = Vec::new();
+    let mut was_cancelled = false;
     let reader = BufReader::new(reader);
     for line in reader.lines() {
         let line = line?;
         writeln!(log, "[{}] {}", prefix, line)?;
+
+        if let Some(cb) = progress {
+            // Emit verbose line first
+            cb(BuildEvent::VerboseLine(line.clone()));
+
+            // Parse for structured events
+            for event in parser.parse_line(&line) {
+                cb(event);
+            }
+        } else {
+            // Still parse to track phases for BuildResult
+            parser.parse_line(&line);
+        }
+
         lines.push(line);
-    }
-    Ok(lines)
-}
 
-/// Find Vivado executable.
-pub fn find_vivado_executable() -> Result<PathBuf, LoomError> {
-    if let Ok(path) = std::env::var("VIVADO_PATH") {
-        let p = PathBuf::from(&path);
-        if p.exists() {
-            return Ok(p);
+        if cancelled.load(Ordering::Relaxed) {
+            was_cancelled = true;
+            break;
         }
     }
 
-    if let Ok(val) = std::env::var("XILINX_VIVADO") {
-        let bin = PathBuf::from(val).join("bin").join(vivado_exe_name());
-        if bin.exists() {
-            return Ok(bin);
+    // Flush any pending completion event from the parser
+    if let Some(cb) = progress {
+        for event in parser.flush() {
+            cb(event);
         }
-    }
-
-    let standard_paths = find_standard_installations();
-    for path in &standard_paths {
-        if path.exists() {
-            return Ok(path.clone());
-        }
-    }
-
-    if let Some(path) = find_on_path() {
-        return Ok(path);
-    }
-
-    Err(LoomError::ToolNotFound {
-        tool: "vivado".to_string(),
-        message: "Not found in VIVADO_PATH, XILINX_VIVADO, standard paths, or system PATH. \
-                  Run `loom env check` for details."
-            .to_string(),
-    })
-}
-
-fn vivado_exe_name() -> &'static str {
-    #[cfg(target_os = "windows")]
-    {
-        "vivado.bat"
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        "vivado"
-    }
-}
-
-fn find_standard_installations() -> Vec<PathBuf> {
-    let mut found = Vec::new();
-
-    let base_dirs: Vec<&str> = if cfg!(target_os = "windows") {
-        vec![r"C:\Xilinx\Vivado", r"C:\tools\Xilinx\Vivado"]
     } else {
-        vec![
-            "/tools/Xilinx/Vivado",
-            "/opt/Xilinx/Vivado",
-            "/home/Xilinx/Vivado",
-        ]
-    };
-
-    for base_dir in base_dirs {
-        let base = PathBuf::from(base_dir);
-        if !base.exists() {
-            continue;
-        }
-        if let Ok(entries) = std::fs::read_dir(&base) {
-            let mut versions: Vec<PathBuf> = entries
-                .flatten()
-                .filter(|e| e.path().is_dir())
-                .map(|e| e.path().join("bin").join(vivado_exe_name()))
-                .filter(|p| p.exists())
-                .collect();
-            versions.sort_by(|a, b| b.cmp(a));
-            found.extend(versions);
-        }
+        parser.flush();
     }
 
-    found
-}
-
-fn find_on_path() -> Option<PathBuf> {
-    #[cfg(not(target_os = "windows"))]
-    {
-        Command::new("which")
-            .arg("vivado")
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .and_then(|o| {
-                let path_str = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if path_str.is_empty() {
-                    None
-                } else {
-                    Some(PathBuf::from(path_str))
-                }
-            })
-    }
-    #[cfg(target_os = "windows")]
-    {
-        Command::new("where")
-            .arg("vivado")
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .and_then(|o| {
-                let path_str = String::from_utf8_lossy(&o.stdout)
-                    .lines()
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
-                if path_str.is_empty() {
-                    None
-                } else {
-                    Some(PathBuf::from(path_str))
-                }
-            })
-    }
+    Ok((lines, was_cancelled))
 }
 
 fn detect_bitstream_path(lines: &[String]) -> Option<PathBuf> {

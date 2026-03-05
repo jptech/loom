@@ -95,11 +95,34 @@ pub fn generate_tcl(
     writeln!(script, "synth_design -top {} -part {}", top_module, part)?;
     writeln!(script)?;
 
+    // Post-synthesis utilization report
+    writeln!(script, "# Post-synthesis utilization")?;
+    writeln!(script, "puts \"LOOM_MARKER:REPORT_UTIL_BEGIN\"")?;
+    writeln!(script, "report_utilization -no_primitives")?;
+    writeln!(script, "puts \"LOOM_MARKER:REPORT_UTIL_END\"")?;
+    writeln!(script)?;
+
     // Implementation
     writeln!(script, "# Implementation")?;
     writeln!(script, "opt_design")?;
     writeln!(script, "place_design")?;
+    writeln!(script)?;
+
+    // Post-placement timing estimate
+    writeln!(script, "# Post-placement timing estimate")?;
+    writeln!(script, "puts \"LOOM_MARKER:POST_PLACE_TIMING_BEGIN\"")?;
+    writeln!(script, "report_timing_summary -no_header")?;
+    writeln!(script, "puts \"LOOM_MARKER:POST_PLACE_TIMING_END\"")?;
+    writeln!(script)?;
+
     writeln!(script, "route_design")?;
+    writeln!(script)?;
+
+    // Post-route timing (final)
+    writeln!(script, "# Post-route timing")?;
+    writeln!(script, "puts \"LOOM_MARKER:POST_ROUTE_TIMING_BEGIN\"")?;
+    writeln!(script, "report_timing_summary -no_header")?;
+    writeln!(script, "puts \"LOOM_MARKER:POST_ROUTE_TIMING_END\"")?;
     writeln!(script)?;
 
     // Bitstream
@@ -113,9 +136,9 @@ pub fn generate_tcl(
     Ok(script)
 }
 
-/// Convert a path to Tcl-safe format (forward slashes on all platforms).
+/// Convert a path to Tcl-safe format (forward slashes, no Windows extended-length prefix).
 pub fn to_tcl_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    loom_core::util::to_tool_path(path)
 }
 
 /// Write the Tcl script to the build directory.
@@ -142,6 +165,28 @@ mod tests {
         discover_members, find_project, find_workspace_root, load_all_components,
     };
 
+    fn resolve_blinky_project() -> ResolvedProject {
+        let fixture =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/blinky");
+        let (root, ws_manifest) = find_workspace_root(&fixture).unwrap();
+        let members = discover_members(&root, &ws_manifest).unwrap();
+        let all_components = load_all_components(&members).unwrap();
+        let (project_root, project_manifest) = find_project(&members, None).unwrap();
+        let source = WorkspaceDependencySource::new(all_components);
+        resolve_project(project_manifest, project_root, root, &source).unwrap()
+    }
+
+    fn resolve_uart_project() -> ResolvedProject {
+        let fixture =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/basys3_uart");
+        let (root, ws_manifest) = find_workspace_root(&fixture).unwrap();
+        let members = discover_members(&root, &ws_manifest).unwrap();
+        let all_components = load_all_components(&members).unwrap();
+        let (project_root, project_manifest) = find_project(&members, Some("basys3_uart")).unwrap();
+        let source = WorkspaceDependencySource::new(all_components);
+        resolve_project(project_manifest, project_root, root, &source).unwrap()
+    }
+
     fn resolve_simple_project() -> ResolvedProject {
         let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../tests/fixtures/simple_project");
@@ -159,6 +204,15 @@ mod tests {
         let tcl_path = to_tcl_path(&path);
         assert!(!tcl_path.contains('\\'));
         assert!(tcl_path.contains('/'));
+    }
+
+    #[test]
+    fn test_tcl_path_strips_extended_length_prefix() {
+        // Windows canonicalize() produces \\?\ prefix
+        let path = PathBuf::from(r"\\?\Z:\loom\examples\blinky\rtl\counter.sv");
+        let tcl_path = to_tcl_path(&path);
+        assert_eq!(tcl_path, "Z:/loom/examples/blinky/rtl/counter.sv");
+        assert!(!tcl_path.contains("//"));
     }
 
     #[test]
@@ -243,5 +297,193 @@ mod tests {
 
         // Check synth_design has correct part
         assert!(script.contains("synth_design -top top -part xczu7ev-ffvc1156-2-e"));
+    }
+
+    #[test]
+    fn test_blinky_demo_tcl_generation() {
+        let resolved = resolve_blinky_project();
+        let filesets = loom_core::assemble::assemble_filesets(&resolved).unwrap();
+        let context = BuildContext::new(resolved.clone(), resolved.workspace_root.clone());
+        let script = generate_tcl(&resolved, &filesets, &context).unwrap();
+
+        // Dependency order: counter.sv must appear before blinky.sv
+        let counter_idx = script.find("counter.sv").expect("counter.sv in script");
+        let blinky_idx = script.find("blinky.sv").expect("blinky.sv in script");
+        let top_idx = script.find("top.sv").expect("top.sv in script");
+        assert!(
+            counter_idx < blinky_idx,
+            "counter.sv must come before blinky.sv"
+        );
+        assert!(blinky_idx < top_idx, "blinky.sv must come before top.sv");
+
+        // Constraint scoping: blinky.xdc is component-scoped, basys3.xdc is global
+        assert!(
+            script.contains("read_xdc -ref blinky"),
+            "blinky.xdc should be component-scoped"
+        );
+        assert!(
+            script.contains("basys3.xdc}"),
+            "basys3.xdc should be present"
+        );
+
+        // Correct part number
+        assert!(
+            script.contains("synth_design -top top -part xc7a35tcpg236-1"),
+            "Should use Basys 3 part number"
+        );
+    }
+
+    #[test]
+    fn test_report_commands_injected() {
+        let resolved = resolve_simple_project();
+        let filesets = loom_core::assemble::assemble_filesets(&resolved).unwrap();
+        let context = BuildContext::new(resolved.clone(), resolved.workspace_root.clone());
+        let script = generate_tcl(&resolved, &filesets, &context).unwrap();
+
+        // Utilization report after synth_design
+        assert!(
+            script.contains("LOOM_MARKER:REPORT_UTIL_BEGIN"),
+            "Should have utilization marker begin"
+        );
+        assert!(
+            script.contains("report_utilization -no_primitives"),
+            "Should inject report_utilization"
+        );
+        assert!(
+            script.contains("LOOM_MARKER:REPORT_UTIL_END"),
+            "Should have utilization marker end"
+        );
+
+        // Post-placement timing
+        assert!(
+            script.contains("LOOM_MARKER:POST_PLACE_TIMING_BEGIN"),
+            "Should have post-place timing marker"
+        );
+        assert!(
+            script.contains("LOOM_MARKER:POST_PLACE_TIMING_END"),
+            "Should have post-place timing marker end"
+        );
+
+        // Post-route timing
+        assert!(
+            script.contains("LOOM_MARKER:POST_ROUTE_TIMING_BEGIN"),
+            "Should have post-route timing marker"
+        );
+        assert!(
+            script.contains("LOOM_MARKER:POST_ROUTE_TIMING_END"),
+            "Should have post-route timing marker end"
+        );
+
+        // Timing summary commands
+        let timing_count = script.matches("report_timing_summary").count();
+        assert_eq!(timing_count, 2, "Should have two timing summary commands");
+    }
+
+    #[test]
+    fn test_report_commands_ordering() {
+        let resolved = resolve_simple_project();
+        let filesets = loom_core::assemble::assemble_filesets(&resolved).unwrap();
+        let context = BuildContext::new(resolved.clone(), resolved.workspace_root.clone());
+        let script = generate_tcl(&resolved, &filesets, &context).unwrap();
+
+        let synth_idx = script.find("synth_design").unwrap();
+        let util_begin_idx = script.find("LOOM_MARKER:REPORT_UTIL_BEGIN").unwrap();
+        let util_end_idx = script.find("LOOM_MARKER:REPORT_UTIL_END").unwrap();
+        let opt_idx = script.find("opt_design").unwrap();
+        let place_idx = script.find("place_design").unwrap();
+        let post_place_idx = script.find("LOOM_MARKER:POST_PLACE_TIMING_BEGIN").unwrap();
+        let route_idx = script.find("route_design").unwrap();
+        let post_route_idx = script.find("LOOM_MARKER:POST_ROUTE_TIMING_BEGIN").unwrap();
+        let bit_idx = script.find("write_bitstream").unwrap();
+
+        assert!(synth_idx < util_begin_idx, "util report after synth");
+        assert!(util_begin_idx < util_end_idx, "util markers ordered");
+        assert!(util_end_idx < opt_idx, "util report before opt");
+        assert!(place_idx < post_place_idx, "post-place timing after place");
+        assert!(post_place_idx < route_idx, "post-place timing before route");
+        assert!(route_idx < post_route_idx, "post-route timing after route");
+        assert!(
+            post_route_idx < bit_idx,
+            "post-route timing before bitstream"
+        );
+    }
+
+    #[test]
+    fn test_uart_demo_tcl_generation() {
+        let resolved = resolve_uart_project();
+        let filesets = loom_core::assemble::assemble_filesets(&resolved).unwrap();
+        let context = BuildContext::new(resolved.clone(), resolved.workspace_root.clone());
+        let script = generate_tcl(&resolved, &filesets, &context).unwrap();
+
+        // Dependency ordering: counter.sv must appear before seg7_controller.sv
+        let counter_idx = script.find("counter.sv").expect("counter.sv in script");
+        let seg7_idx = script
+            .find("seg7_controller.sv")
+            .expect("seg7_controller.sv in script");
+        let top_idx = script.find("top.sv").expect("top.sv in script");
+        assert!(
+            counter_idx < seg7_idx,
+            "counter.sv must come before seg7_controller.sv (dependency order)"
+        );
+        assert!(
+            seg7_idx < top_idx,
+            "seg7_controller.sv must come before top.sv"
+        );
+
+        // UART files present
+        assert!(
+            script.contains("uart_tx.sv"),
+            "uart_tx.sv should be in script"
+        );
+        assert!(
+            script.contains("uart_rx.sv"),
+            "uart_rx.sv should be in script"
+        );
+        assert!(
+            script.contains("cdc_sync.sv"),
+            "cdc_sync.sv should be in script"
+        );
+        assert!(
+            script.contains("clk_gen.sv"),
+            "clk_gen.sv should be in script"
+        );
+
+        // Component-scoped constraint with -ref for clk_gen (module name matches)
+        assert!(
+            script.contains("read_xdc -ref clk_gen"),
+            "clk_gen.xdc should be component-scoped"
+        );
+
+        // uart_cdc.xdc is global (no wrapper module, uses hierarchical paths)
+        let uart_xdc_line = script
+            .lines()
+            .find(|l| l.contains("uart_cdc.xdc"))
+            .expect("uart_cdc.xdc should be present");
+        assert!(
+            !uart_xdc_line.contains("-ref"),
+            "uart_cdc.xdc should be global (no -ref)"
+        );
+
+        // basys3.xdc is global
+        let basys3_line = script
+            .lines()
+            .find(|l| l.contains("basys3.xdc"))
+            .expect("basys3.xdc should be present");
+        assert!(
+            !basys3_line.contains("-ref"),
+            "basys3.xdc should be global (no -ref)"
+        );
+
+        // Generated clock constraint file is referenced
+        assert!(
+            script.contains("clk_gen.xdc"),
+            "clk_gen.xdc should appear in constraints"
+        );
+
+        // Correct part number
+        assert!(
+            script.contains("synth_design -top top -part xc7a35tcpg236-1"),
+            "Should use Basys 3 part number"
+        );
     }
 }

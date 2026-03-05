@@ -23,7 +23,7 @@ pub fn generate_yosys_script(
 
     // Read source files
     for file in &filesets.synth_files {
-        let path_str = file.path.display().to_string().replace('\\', "/");
+        let path_str = loom_core::util::to_tool_path(&file.path);
         match file.language {
             FileLanguage::SystemVerilog => {
                 script.push_str(&format!("read_verilog -sv {}\n", path_str));

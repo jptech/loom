@@ -1,0 +1,14 @@
+[component]
+name = "demo/blinky"
+version = "1.0.0"
+description = "LED blinker using counter"
+
+[filesets.synth]
+files = ["rtl/blinky.sv"]
+constraints = ["constraints/blinky.xdc"]
+
+[synth]
+ooc = false
+
+[dependencies]
+counter = ">=1.0.0"

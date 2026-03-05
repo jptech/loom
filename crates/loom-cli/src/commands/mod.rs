@@ -10,3 +10,4 @@ pub mod new;
 pub mod registry;
 pub mod report;
 pub mod sim;
+pub mod status;

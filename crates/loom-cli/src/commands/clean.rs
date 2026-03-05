@@ -3,6 +3,7 @@ use clap::Args;
 use loom_core::error::LoomError;
 use loom_core::resolve::{discover_members, find_workspace_root, MemberKind, MemberPath};
 
+use crate::ui::{self, Icon};
 use crate::GlobalContext;
 
 #[derive(Args)]
@@ -37,10 +38,10 @@ pub fn run(args: CleanArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
                 source: e,
             })?;
             if !ctx.quiet {
-                eprintln!("  Removed {}", build_dir.display());
+                ui::status(Icon::Check, "Removed", &build_dir.display().to_string());
             }
         } else if !ctx.quiet {
-            eprintln!("  Nothing to clean.");
+            ui::status(Icon::Dot, "Clean", "nothing to clean");
         }
     } else {
         let members = discover_members(&workspace_root, &ws_manifest)?;
@@ -59,10 +60,18 @@ pub fn run(args: CleanArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
                 source: e,
             })?;
             if !ctx.quiet {
-                eprintln!("  Removed {}", project_build_dir.display());
+                ui::status(
+                    Icon::Check,
+                    "Removed",
+                    &project_build_dir.display().to_string(),
+                );
             }
         } else if !ctx.quiet {
-            eprintln!("  Nothing to clean for project '{}'.", project_name);
+            ui::status(
+                Icon::Dot,
+                "Clean",
+                &format!("nothing to clean for '{}'", project_name),
+            );
         }
     }
     Ok(())

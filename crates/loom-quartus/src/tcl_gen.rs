@@ -38,7 +38,7 @@ pub fn generate_quartus_tcl(
 
     // Source files
     for file in &filesets.synth_files {
-        let path_str = file.path.display().to_string().replace('\\', "/");
+        let path_str = loom_core::util::to_tool_path(&file.path);
         match file.language {
             FileLanguage::SystemVerilog => {
                 tcl.push_str(&format!(
@@ -66,7 +66,7 @@ pub fn generate_quartus_tcl(
 
     // Constraint files (.sdc)
     for constraint in &filesets.constraint_files {
-        let path_str = constraint.path.display().to_string().replace('\\', "/");
+        let path_str = loom_core::util::to_tool_path(&constraint.path);
         let ext = constraint
             .path
             .extension()

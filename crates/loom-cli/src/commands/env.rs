@@ -3,16 +3,24 @@ use clap::{Args, Subcommand};
 use loom_core::error::LoomError;
 
 use crate::backend_registry::get_backend;
+use crate::ui::{self, Icon};
 use crate::GlobalContext;
 
 #[derive(Subcommand)]
 pub enum EnvCommands {
     /// Check tool environment
-    Check,
+    Check(EnvCheckArgs),
     /// Open a subshell with the tool environment configured
     Shell(EnvShellArgs),
     /// Generate a Dockerfile for CI builds
     Dockerfile(DockerfileArgs),
+}
+
+#[derive(Args)]
+pub struct EnvCheckArgs {
+    /// Backend to check (default: auto-detect from project.toml, fallback: vivado)
+    #[arg(short, long)]
+    pub backend: Option<String>,
 }
 
 #[derive(Args)]
@@ -43,14 +51,30 @@ pub struct DockerfileArgs {
 
 pub fn run(cmd: EnvCommands, ctx: &GlobalContext) -> Result<(), LoomError> {
     match cmd {
-        EnvCommands::Check => run_check(ctx),
+        EnvCommands::Check(args) => run_check(args, ctx),
         EnvCommands::Shell(args) => run_shell(args, ctx),
         EnvCommands::Dockerfile(args) => run_dockerfile(args, ctx),
     }
 }
 
-fn run_check(ctx: &GlobalContext) -> Result<(), LoomError> {
-    let backend = get_backend("vivado")?;
+/// Try to detect backend from project.toml in the current workspace.
+fn detect_backend_from_project() -> Option<String> {
+    use loom_core::resolve::workspace::{discover_members, find_project, find_workspace_root};
+
+    let cwd = std::env::current_dir().ok()?;
+    let (root, ws_manifest) = find_workspace_root(&cwd).ok()?;
+    let members = discover_members(&root, &ws_manifest).ok()?;
+    let (_project_root, project_manifest) = find_project(&members, None).ok()?;
+    let target = project_manifest.target.as_ref()?;
+    Some(target.backend.clone())
+}
+
+fn run_check(args: EnvCheckArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
+    let backend_name = args
+        .backend
+        .or_else(detect_backend_from_project)
+        .unwrap_or_else(|| "vivado".to_string());
+    let backend = get_backend(&backend_name)?;
     let status = backend.check_environment(None)?;
 
     if ctx.json {
@@ -68,24 +92,29 @@ fn run_check(ctx: &GlobalContext) -> Result<(), LoomError> {
             serde_json::to_string_pretty(&json).unwrap_or_default()
         );
     } else {
-        println!("Backend: {}", status.tool_name);
-        println!("  Path:    {}", status.tool_path.display());
-        println!("  Version: {}", status.version);
+        let icon = if status.is_ok() {
+            Icon::Check
+        } else {
+            Icon::Cross
+        };
+        ui::status(icon, &status.tool_name, "");
+        ui::detail_line("Path", &status.tool_path.display().to_string());
+        ui::detail_line("Version", &status.version);
         if let Some(req) = &status.required_version {
             let ok_str = if status.version_matches {
                 "OK"
             } else {
                 "MISMATCH"
             };
-            println!("  Required: {} [{}]", req, ok_str);
+            ui::detail_line("Required", &format!("{} [{}]", req, ok_str));
         }
         let license_str = if status.license_ok { "OK" } else { "FAILED" };
-        println!("  License: {}", license_str);
+        ui::detail_line("License", license_str);
         if let Some(detail) = &status.license_detail {
-            println!("    ({})", detail);
+            eprintln!("      ({})", detail);
         }
         for warning in &status.warnings {
-            println!("  warning: {}", warning);
+            ui::sub_warning(warning);
         }
     }
 
@@ -104,12 +133,13 @@ fn run_shell(args: EnvShellArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     let status = backend.check_environment(None)?;
 
     if !ctx.quiet {
-        eprintln!(
-            "Launching shell with {} {} environment...",
-            status.tool_name, status.version
+        ui::status(
+            Icon::Dot,
+            "Shell",
+            &format!("{} {} environment", status.tool_name, status.version),
         );
-        eprintln!("  Tool path: {}", status.tool_path.display());
-        eprintln!("  Type 'exit' to return to normal shell.");
+        ui::detail_line("Path", &status.tool_path.display().to_string());
+        eprintln!("    Type 'exit' to return to normal shell.");
     }
 
     // Get the tool's bin directory to prepend to PATH
@@ -181,7 +211,11 @@ fn run_dockerfile(args: DockerfileArgs, ctx: &GlobalContext) -> Result<(), LoomE
             source: e,
         })?;
         if !ctx.quiet {
-            eprintln!("  Wrote Dockerfile to {}", output_path);
+            ui::status(
+                Icon::Check,
+                "Dockerfile",
+                &format!("written to {}", output_path),
+            );
         }
     } else {
         println!("{}", dockerfile);

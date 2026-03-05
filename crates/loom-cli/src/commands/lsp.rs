@@ -8,6 +8,7 @@ use loom_core::resolve::{
     WorkspaceDependencySource,
 };
 
+use crate::ui::{self, Icon};
 use crate::GlobalContext;
 
 #[derive(Args)]
@@ -86,7 +87,11 @@ pub fn run(args: LspArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
             })?;
 
             if !ctx.quiet {
-                eprintln!("  Wrote {}", output_path.display());
+                ui::status(
+                    Icon::Check,
+                    "LSP",
+                    &format!("wrote {}", output_path.display()),
+                );
             }
         }
         "svls" => {
@@ -108,7 +113,11 @@ pub fn run(args: LspArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
             })?;
 
             if !ctx.quiet {
-                eprintln!("  Wrote {}", output_path.display());
+                ui::status(
+                    Icon::Check,
+                    "LSP",
+                    &format!("wrote {}", output_path.display()),
+                );
             }
         }
         "verible" => {
@@ -125,7 +134,11 @@ pub fn run(args: LspArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
             })?;
 
             if !ctx.quiet {
-                eprintln!("  Wrote {}", output_path.display());
+                ui::status(
+                    Icon::Check,
+                    "LSP",
+                    &format!("wrote {}", output_path.display()),
+                );
             }
         }
         "slang" => {
@@ -145,7 +158,11 @@ pub fn run(args: LspArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
             })?;
 
             if !ctx.quiet {
-                eprintln!("  Wrote {}", output_path.display());
+                ui::status(
+                    Icon::Check,
+                    "LSP",
+                    &format!("wrote {}", output_path.display()),
+                );
             }
         }
         other => {

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use crate::resolve::resolver::ResolvedProject;
 
@@ -11,6 +13,8 @@ pub struct BuildContext {
     pub workspace_root: PathBuf,
     pub env: HashMap<String, String>,
     pub strategy: String,
+    /// Cancellation flag set by Ctrl+C handler.
+    pub cancelled: Arc<AtomicBool>,
 }
 
 impl BuildContext {
@@ -26,6 +30,7 @@ impl BuildContext {
             env: std::env::vars().collect(),
             strategy: "default".to_string(),
             project,
+            cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
 }

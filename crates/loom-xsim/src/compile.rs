@@ -50,7 +50,7 @@ pub fn compile_xsim(
         }
 
         for file in &sv_files {
-            cmd.arg(file.path.display().to_string().replace('\\', "/"));
+            cmd.arg(loom_core::util::to_tool_path(&file.path));
         }
 
         let output = cmd.output().map_err(|e| LoomError::ToolNotFound {
@@ -86,7 +86,7 @@ pub fn compile_xsim(
         cmd.current_dir(&sim_dir);
 
         for file in &vhdl_files {
-            cmd.arg(file.path.display().to_string().replace('\\', "/"));
+            cmd.arg(loom_core::util::to_tool_path(&file.path));
         }
 
         let output = cmd.output().map_err(|e| LoomError::ToolNotFound {

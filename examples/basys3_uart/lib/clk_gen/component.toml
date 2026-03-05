@@ -1,0 +1,8 @@
+[component]
+name = "demo/clk_gen"
+version = "1.0.0"
+description = "MMCME2_BASE clock generator — 100 MHz to 50 MHz"
+
+[filesets.synth]
+files = ["rtl/clk_gen.sv"]
+constraints = ["constraints/clk_gen.xdc"]

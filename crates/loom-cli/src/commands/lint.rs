@@ -3,6 +3,7 @@ use clap::Args;
 use loom_core::error::LoomError;
 use loom_core::resolve::{discover_members, find_workspace_root, MemberKind};
 
+use crate::ui::{self, Icon};
 use crate::GlobalContext;
 
 #[derive(Args)]
@@ -27,12 +28,20 @@ pub fn run(_args: LintArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
         let manifest_path = member.path.join("component.toml");
         match loom_core::manifest::load_component_manifest(&manifest_path) {
             Err(e) => {
-                eprintln!("  error: {}: {}", manifest_path.display(), e);
+                ui::status(
+                    Icon::Cross,
+                    "Error",
+                    &format!("{}: {}", manifest_path.display(), e),
+                );
                 error_count += 1;
             }
             Ok(manifest) => {
                 for err in manifest.validate() {
-                    eprintln!("  error: {}: {}", manifest_path.display(), err);
+                    ui::status(
+                        Icon::Cross,
+                        "Error",
+                        &format!("{}: {}", manifest_path.display(), err),
+                    );
                     error_count += 1;
                 }
             }
@@ -44,12 +53,20 @@ pub fn run(_args: LintArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
         let manifest_path = member.path.join("project.toml");
         match loom_core::manifest::load_project_manifest(&manifest_path) {
             Err(e) => {
-                eprintln!("  error: {}: {}", manifest_path.display(), e);
+                ui::status(
+                    Icon::Cross,
+                    "Error",
+                    &format!("{}: {}", manifest_path.display(), e),
+                );
                 error_count += 1;
             }
             Ok(manifest) => {
                 for err in manifest.validate() {
-                    eprintln!("  error: {}: {}", manifest_path.display(), err);
+                    ui::status(
+                        Icon::Cross,
+                        "Error",
+                        &format!("{}: {}", manifest_path.display(), err),
+                    );
                     error_count += 1;
                 }
             }
@@ -58,9 +75,9 @@ pub fn run(_args: LintArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
 
     if !ctx.quiet {
         if error_count == 0 {
-            println!("  All manifests are valid.");
+            ui::status(Icon::Check, "Lint", "all manifests are valid");
         } else {
-            println!("  {} error(s).", error_count);
+            ui::status(Icon::Cross, "Lint", &format!("{} error(s)", error_count));
         }
     }
 

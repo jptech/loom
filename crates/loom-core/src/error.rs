@@ -78,6 +78,9 @@ pub enum LoomError {
     #[error("Tool version mismatch: required {required}, found {found}")]
     ToolVersionMismatch { required: String, found: String },
 
+    #[error("Build interrupted by user")]
+    Interrupted,
+
     #[error("Internal error: {0}")]
     Internal(String),
 }
@@ -107,6 +110,9 @@ impl LoomError {
             // 3 = env error
             LoomError::ToolNotFound { .. } => 3,
             LoomError::ToolVersionMismatch { .. } => 3,
+
+            // 130 = interrupted (128 + SIGINT)
+            LoomError::Interrupted => 130,
 
             // 4 = internal
             LoomError::Io { .. } => 4,

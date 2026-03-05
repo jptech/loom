@@ -1,0 +1,18 @@
+[project]
+name = "basys3_uart"
+top_module = "top"
+description = "UART echo with 7-segment display on Basys 3"
+
+[target]
+part = "xc7a35tcpg236-1"
+backend = "vivado"
+
+[filesets.synth]
+files = ["src/top.sv"]
+constraints = ["constraints/basys3.xdc"]
+constraint_scope = "global"
+
+[dependencies]
+clk_gen = ">=1.0.0"
+uart = ">=1.0.0"
+seg7_driver = ">=1.0.0"

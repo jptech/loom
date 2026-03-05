@@ -25,7 +25,7 @@ pub fn generate_ooc_tcl(
 
     // Read source files
     for file in files {
-        let path_str = file.path.display().to_string().replace('\\', "/");
+        let path_str = loom_core::util::to_tool_path(&file.path);
         match file.language {
             FileLanguage::SystemVerilog => {
                 tcl.push_str(&format!("read_verilog -sv {{{}}}\n", path_str));
@@ -52,12 +52,12 @@ pub fn generate_ooc_tcl(
 
     // Write checkpoint
     let dcp_path = output_dir.join("post_ooc_synth.dcp");
-    let dcp_str = dcp_path.display().to_string().replace('\\', "/");
+    let dcp_str = loom_core::util::to_tool_path(&dcp_path);
     tcl.push_str(&format!("write_checkpoint -force {{{}}}\n", dcp_str));
 
     // Write utilization report
     let rpt_path = output_dir.join("ooc_utilization.rpt");
-    let rpt_str = rpt_path.display().to_string().replace('\\', "/");
+    let rpt_str = loom_core::util::to_tool_path(&rpt_path);
     tcl.push_str(&format!("report_utilization -file {{{}}}\n", rpt_str));
 
     let script_path = output_dir.join("ooc_synth.tcl");
@@ -104,7 +104,7 @@ pub fn generate_read_checkpoints_tcl(ooc_scripts: &[OocScript]) -> String {
 
     tcl.push_str("# Load OOC synthesis checkpoints\n");
     for script in ooc_scripts {
-        let dcp_str = script.dcp_path.display().to_string().replace('\\', "/");
+        let dcp_str = loom_core::util::to_tool_path(&script.dcp_path);
         tcl.push_str(&format!("read_checkpoint {{{}}}\n", dcp_str));
     }
     tcl.push('\n');

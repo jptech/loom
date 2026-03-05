@@ -27,6 +27,8 @@ colored.workspace = true
 indicatif.workspace = true
 quick-xml.workspace = true
 walkdir.workspace = true
+ctrlc.workspace = true
+chrono.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

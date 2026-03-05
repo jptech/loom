@@ -3,6 +3,7 @@ use clap::{Args, Subcommand};
 use loom_core::error::LoomError;
 use loom_core::resolve::registry::{RegistryConfig, RegistryDependencySource};
 
+use crate::ui::{self, Icon};
 use crate::GlobalContext;
 
 #[derive(Subcommand)]
@@ -59,7 +60,7 @@ fn run_search(args: SearchArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     let source = RegistryDependencySource::new(config, get_cache_dir()?);
 
     if !ctx.quiet {
-        eprintln!("  Searching registry for '{}'...", args.query);
+        ui::status(Icon::Dot, "Search", &format!("'{}'", args.query));
     }
 
     let results = source.search(&args.query)?;
@@ -70,7 +71,11 @@ fn run_search(args: SearchArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
             serde_json::to_string_pretty(&results).unwrap_or_default()
         );
     } else if results.is_empty() {
-        eprintln!("  No packages found matching '{}'.", args.query);
+        ui::status(
+            Icon::Dot,
+            "Search",
+            &format!("no packages found matching '{}'", args.query),
+        );
     } else {
         for pkg in &results {
             let desc = pkg.description.as_deref().unwrap_or("(no description)");
@@ -91,9 +96,10 @@ fn run_publish(args: PublishArgs, ctx: &GlobalContext) -> Result<(), LoomError> 
     };
 
     if !ctx.quiet {
-        eprintln!(
-            "  Preparing to publish component at {}...",
-            component_root.display()
+        ui::status(
+            Icon::Dot,
+            "Publish",
+            &format!("preparing {}", component_root.display()),
         );
     }
 
@@ -111,9 +117,13 @@ fn run_publish(args: PublishArgs, ctx: &GlobalContext) -> Result<(), LoomError> 
     }
 
     if args.dry_run {
-        eprintln!(
-            "  Dry run: {} v{} is valid and ready to publish.",
-            manifest.component.name, manifest.component.version
+        ui::status(
+            Icon::Check,
+            "Publish",
+            &format!(
+                "dry run: {} v{} is valid",
+                manifest.component.name, manifest.component.version
+            ),
         );
         return Ok(());
     }
@@ -141,9 +151,13 @@ fn run_publish(args: PublishArgs, ctx: &GlobalContext) -> Result<(), LoomError> 
     let url = source.publish(&tarball)?;
 
     if !ctx.quiet {
-        eprintln!(
-            "  Published {} v{}: {}",
-            manifest.component.name, manifest.component.version, url
+        ui::status(
+            Icon::Check,
+            "Published",
+            &format!(
+                "{} v{}: {}",
+                manifest.component.name, manifest.component.version, url
+            ),
         );
     }
 
@@ -155,14 +169,18 @@ fn run_install(args: InstallArgs, ctx: &GlobalContext) -> Result<(), LoomError> 
     let source = RegistryDependencySource::new(config, get_cache_dir()?);
 
     if !ctx.quiet {
-        eprintln!("  Installing {} ({})...", args.package, args.version);
+        ui::status(
+            Icon::Dot,
+            "Install",
+            &format!("{} ({})", args.package, args.version),
+        );
     }
 
     // List available versions
     let versions = source.list_versions(&args.package)?;
 
-    if !ctx.quiet {
-        eprintln!("  Available versions: {:?}", versions);
+    if !ctx.quiet && ctx.verbose > 0 {
+        eprintln!("    Available versions: {:?}", versions);
     }
 
     // Download the latest matching version
@@ -173,11 +191,10 @@ fn run_install(args: InstallArgs, ctx: &GlobalContext) -> Result<(), LoomError> 
     let path = source.download(&args.package, version)?;
 
     if !ctx.quiet {
-        eprintln!(
-            "  Installed {} v{} to {}",
-            args.package,
-            version,
-            path.display()
+        ui::status(
+            Icon::Check,
+            "Installed",
+            &format!("{} v{} to {}", args.package, version, path.display()),
         );
     }
 

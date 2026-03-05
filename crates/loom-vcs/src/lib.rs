@@ -82,11 +82,11 @@ impl SimulatorPlugin for VcsBackend {
         for file in &filesets.synth_files {
             match file.language {
                 FileLanguage::SystemVerilog | FileLanguage::Verilog => {
-                    cmd.arg(file.path.display().to_string().replace('\\', "/"));
+                    cmd.arg(loom_core::util::to_tool_path(&file.path));
                 }
                 FileLanguage::Vhdl => {
                     cmd.arg("-vhdl08");
-                    cmd.arg(file.path.display().to_string().replace('\\', "/"));
+                    cmd.arg(loom_core::util::to_tool_path(&file.path));
                 }
                 _ => {}
             }

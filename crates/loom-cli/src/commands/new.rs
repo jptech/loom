@@ -4,6 +4,7 @@ use clap::{Args, Subcommand};
 
 use loom_core::error::LoomError;
 
+use crate::ui::{self, Icon};
 use crate::GlobalContext;
 
 #[derive(Subcommand)]
@@ -16,6 +17,9 @@ pub enum NewCommands {
 
     /// Create a new platform
     Platform(NewPlatformArgs),
+
+    /// Create a new workspace
+    Workspace(NewWorkspaceArgs),
 }
 
 #[derive(Args)]
@@ -48,11 +52,23 @@ pub struct NewPlatformArgs {
     pub name: Option<String>,
 }
 
+#[derive(Args)]
+pub struct NewWorkspaceArgs {
+    /// Path to create the workspace at (default: current directory)
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+
+    /// Workspace name (default: directory name)
+    #[arg(long)]
+    pub name: Option<String>,
+}
+
 pub fn run(cmd: NewCommands, ctx: &GlobalContext) -> Result<(), LoomError> {
     match cmd {
         NewCommands::Component(args) => run_new_component(args, ctx),
         NewCommands::Project(args) => run_new_project(args, ctx),
         NewCommands::Platform(args) => run_new_platform(args, ctx),
+        NewCommands::Workspace(args) => run_new_workspace(args, ctx),
     }
 }
 
@@ -101,7 +117,11 @@ ooc = false
     )?;
 
     if !ctx.quiet {
-        eprintln!("  Created component '{}' at {}", name, path.display());
+        ui::status(
+            Icon::Check,
+            "Created",
+            &format!("component '{}' at {}", name, path.display()),
+        );
     }
 
     Ok(())
@@ -128,7 +148,7 @@ description = "TODO: describe this project"
 # platform = "zcu104"  # uncomment to use a platform
 
 [target]
-part = "xc7a35t"
+part = "xc7a35tcpg236-1"
 backend = "vivado"
 # version = "2023.2"
 
@@ -158,7 +178,11 @@ include_synth = true
     write_file(&path.join("constraints").join("timing.xdc"), xdc_content)?;
 
     if !ctx.quiet {
-        eprintln!("  Created project '{}' at {}", name, path.display());
+        ui::status(
+            Icon::Check,
+            "Created",
+            &format!("project '{}' at {}", name, path.display()),
+        );
     }
 
     Ok(())
@@ -212,7 +236,43 @@ tags = ["vendor:xilinx"]
     write_file(&path.join("constraints").join("pins.xdc"), xdc_content)?;
 
     if !ctx.quiet {
-        eprintln!("  Created platform '{}' at {}", name, path.display());
+        ui::status(
+            Icon::Check,
+            "Created",
+            &format!("platform '{}' at {}", name, path.display()),
+        );
+    }
+
+    Ok(())
+}
+
+fn run_new_workspace(args: NewWorkspaceArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
+    let path = &args.path;
+    let dir_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("my_workspace");
+    let name = args.name.unwrap_or_else(|| dir_name.to_string());
+
+    create_dir(path)?;
+    create_dir(&path.join("lib"))?;
+    create_dir(&path.join("projects"))?;
+
+    let content = format!(
+        r#"[workspace]
+name = "{name}"
+members = ["lib/*", "projects/*"]
+"#
+    );
+
+    write_file(&path.join("workspace.toml"), &content)?;
+
+    if !ctx.quiet {
+        ui::status(
+            Icon::Check,
+            "Created",
+            &format!("workspace '{}' at {}", name, path.display()),
+        );
     }
 
     Ok(())
@@ -245,6 +305,7 @@ mod tests {
             quiet: true,
             json: false,
             no_color: false,
+            cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
 
         run_new_component(
@@ -275,6 +336,7 @@ mod tests {
             quiet: true,
             json: false,
             no_color: false,
+            cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
 
         run_new_project(
@@ -293,6 +355,36 @@ mod tests {
     }
 
     #[test]
+    fn test_new_workspace_creates_files() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("my_ws");
+        let ctx = crate::GlobalContext {
+            verbose: 0,
+            quiet: true,
+            json: false,
+            no_color: false,
+            cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+
+        run_new_workspace(
+            NewWorkspaceArgs {
+                path: path.clone(),
+                name: None,
+            },
+            &ctx,
+        )
+        .unwrap();
+
+        assert!(path.join("workspace.toml").exists());
+        assert!(path.join("lib").is_dir());
+        assert!(path.join("projects").is_dir());
+
+        let content = std::fs::read_to_string(path.join("workspace.toml")).unwrap();
+        assert!(content.contains("name = \"my_ws\""));
+        assert!(content.contains("members = [\"lib/*\", \"projects/*\"]"));
+    }
+
+    #[test]
     fn test_new_platform_creates_files() {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("zcu104");
@@ -301,6 +393,7 @@ mod tests {
             quiet: true,
             json: false,
             no_color: false,
+            cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
 
         run_new_platform(

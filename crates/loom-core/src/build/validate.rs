@@ -238,6 +238,7 @@ mod tests {
             &self,
             _s: &[PathBuf],
             _c: &BuildContext,
+            _progress: Option<&(dyn Fn(crate::build::progress::BuildEvent) + Send + Sync)>,
         ) -> Result<BuildResult, LoomError> {
             unimplemented!()
         }

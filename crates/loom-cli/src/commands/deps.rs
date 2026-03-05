@@ -7,6 +7,7 @@ use loom_core::resolve::{
     MemberKind, WorkspaceDependencySource,
 };
 
+use crate::ui::{self, Icon};
 use crate::GlobalContext;
 
 #[derive(Subcommand)]
@@ -21,6 +22,10 @@ pub enum DepsCommands {
 pub struct DepsTreeArgs {
     #[arg(short = 'p', long)]
     pub project: Option<String>,
+
+    /// Show detailed per-component information
+    #[arg(long = "detail")]
+    pub detail: bool,
 }
 
 #[derive(Args)]
@@ -71,17 +76,74 @@ fn run_tree(args: DepsTreeArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
             serde_json::to_string_pretty(&tree).unwrap_or_default()
         );
     } else {
-        println!("{}", resolved.project.project.name);
+        ui::tree_root(&resolved.project.project.name);
+        let verbose = args.detail || ctx.verbose > 0;
         for (i, comp) in resolved.resolved_components.iter().enumerate() {
             let is_last = i == resolved.resolved_components.len() - 1;
-            let prefix = if is_last { "└──" } else { "├──" };
-            println!(
-                "  {} {} v{}",
-                prefix, comp.manifest.component.name, comp.resolved_version
+            ui::tree_item(
+                &format!(
+                    "{} v{}",
+                    comp.manifest.component.name, comp.resolved_version
+                ),
+                is_last,
             );
+            if verbose {
+                let synth_fs = comp.manifest.filesets.get("synth");
+                let file_count = synth_fs.map(|s| s.files.len()).unwrap_or(0);
+                let constraint_count = synth_fs.map(|s| s.constraints.len()).unwrap_or(0);
+                let languages = detect_languages(comp);
+                let ooc = comp
+                    .manifest
+                    .synth
+                    .as_ref()
+                    .map(|s| if s.ooc { "yes" } else { "no" });
+                let mut detail = format!(
+                    "{} files ({})  \u{00B7}  {} constraint{}",
+                    file_count,
+                    languages,
+                    constraint_count,
+                    if constraint_count == 1 { "" } else { "s" }
+                );
+                if let Some(ooc_val) = ooc {
+                    detail.push_str(&format!("  \u{00B7}  OOC: {}", ooc_val));
+                }
+                ui::tree_detail(&detail, is_last);
+            }
         }
     }
     Ok(())
+}
+
+fn detect_languages(comp: &loom_core::resolve::resolver::ResolvedComponent) -> String {
+    let mut langs = Vec::new();
+    if let Some(synth) = comp.manifest.filesets.get("synth") {
+        for f in &synth.files {
+            let ext = f.extension().and_then(|e| e.to_str()).unwrap_or("");
+            match ext {
+                "sv" | "svh" => {
+                    if !langs.contains(&"SystemVerilog") {
+                        langs.push("SystemVerilog");
+                    }
+                }
+                "v" | "vh" => {
+                    if !langs.contains(&"Verilog") {
+                        langs.push("Verilog");
+                    }
+                }
+                "vhd" | "vhdl" => {
+                    if !langs.contains(&"VHDL") {
+                        langs.push("VHDL");
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    if langs.is_empty() {
+        "unknown".to_string()
+    } else {
+        langs.join(", ")
+    }
 }
 
 fn run_update(_args: DepsUpdateArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
@@ -94,7 +156,7 @@ fn run_update(_args: DepsUpdateArgs, ctx: &GlobalContext) -> Result<(), LoomErro
     let all_components = load_all_components(&members)?;
 
     if !ctx.quiet {
-        eprintln!("  Re-resolving dependencies...");
+        ui::status(Icon::Dot, "Deps", "re-resolving dependencies...");
     }
 
     if let Some(member) = members.iter().find(|m| m.kind == MemberKind::Project) {
@@ -110,7 +172,7 @@ fn run_update(_args: DepsUpdateArgs, ctx: &GlobalContext) -> Result<(), LoomErro
         let lockfile = generate_lockfile(&resolved, &members)?;
         write_lockfile(&lockfile, &workspace_root)?;
         if !ctx.quiet {
-            eprintln!("  Lockfile updated.");
+            ui::status(Icon::Check, "Deps", "lockfile updated");
         }
     }
 

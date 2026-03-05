@@ -72,7 +72,7 @@ impl SimulatorPlugin for XceliumBackend {
                     FileLanguage::SystemVerilog | FileLanguage::Verilog
                 )
             })
-            .map(|f| f.path.display().to_string().replace('\\', "/"))
+            .map(|f| loom_core::util::to_tool_path(&f.path))
             .collect();
 
         if !sv_files.is_empty() {
@@ -114,7 +114,7 @@ impl SimulatorPlugin for XceliumBackend {
             .synth_files
             .iter()
             .filter(|f| matches!(f.language, FileLanguage::Vhdl))
-            .map(|f| f.path.display().to_string().replace('\\', "/"))
+            .map(|f| loom_core::util::to_tool_path(&f.path))
             .collect();
 
         if !vhdl_files.is_empty() {

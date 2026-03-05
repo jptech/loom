@@ -1,10 +1,12 @@
 use std::process;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
-use colored::Colorize;
 
 mod backend_registry;
 mod commands;
+pub mod ui;
 
 #[derive(Parser)]
 #[command(name = "loom", about = "FPGA build system", version, author)]
@@ -72,6 +74,9 @@ pub enum Commands {
 
     /// Run simulation
     Sim(commands::sim::SimArgs),
+
+    /// Show project status dashboard
+    Status(commands::status::StatusArgs),
 }
 
 pub struct GlobalContext {
@@ -79,6 +84,7 @@ pub struct GlobalContext {
     pub quiet: bool,
     pub json: bool,
     pub no_color: bool,
+    pub cancelled: Arc<AtomicBool>,
 }
 
 fn main() {
@@ -88,11 +94,23 @@ fn main() {
         colored::control::set_override(false);
     }
 
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled_clone = Arc::clone(&cancelled);
+    ctrlc::set_handler(move || {
+        if cancelled_clone.load(Ordering::Relaxed) {
+            // Second Ctrl+C — bail immediately
+            process::exit(130);
+        }
+        cancelled_clone.store(true, Ordering::Relaxed);
+    })
+    .expect("Failed to set Ctrl+C handler");
+
     let ctx = GlobalContext {
         verbose: cli.verbose,
         quiet: cli.quiet,
         json: cli.json,
         no_color: cli.no_color,
+        cancelled,
     };
 
     let result = match cli.command {
@@ -108,6 +126,7 @@ fn main() {
         Commands::Registry(cmd) => commands::registry::run(cmd, &ctx),
         Commands::Report(args) => commands::report::run(args, &ctx),
         Commands::Sim(args) => commands::sim::run(args, &ctx),
+        Commands::Status(args) => commands::status::run(args, &ctx),
     };
 
     match result {
@@ -134,13 +153,9 @@ fn display_error(err: &loom_core::error::LoomError, ctx: &GlobalContext) {
             1 => "Build error",
             2 => "Configuration error",
             3 => "Environment error",
+            130 => "Interrupted",
             _ => "Error",
         };
-        eprintln!(
-            "{} {}",
-            format!("error[E{}]:", err.exit_code()).red().bold(),
-            prefix.red()
-        );
-        eprintln!("  {}", err);
+        ui::error_block(err.exit_code(), prefix, &err.to_string());
     }
 }

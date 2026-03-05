@@ -4,6 +4,7 @@ use clap::{Args, Subcommand};
 
 use loom_core::error::LoomError;
 
+use crate::ui::{self, Icon};
 use crate::GlobalContext;
 
 #[derive(Subcommand)]
@@ -70,7 +71,7 @@ fn run_xci_to_toml(args: XciToTomlArgs, ctx: &GlobalContext) -> Result<(), LoomE
 
     for file in &files {
         if !ctx.quiet {
-            eprintln!("  Processing {} ...", file.display());
+            ui::status(Icon::Dot, "Processing", &file.display().to_string());
         }
         match parse_xci(file) {
             Ok(toml_output) => {
@@ -264,7 +265,7 @@ fn run_qsf_to_toml(args: QsfToTomlArgs, ctx: &GlobalContext) -> Result<(), LoomE
     }
 
     if !ctx.quiet {
-        eprintln!("  Parsing {} ...", args.file.display());
+        ui::status(Icon::Dot, "Parsing", &args.file.display().to_string());
     }
 
     let content = std::fs::read_to_string(&args.file).map_err(|e| LoomError::Io {
@@ -368,7 +369,7 @@ fn run_tcl_audit(args: TclAuditArgs, ctx: &GlobalContext) -> Result<(), LoomErro
     }
 
     if !ctx.quiet {
-        eprintln!("  Auditing {} ...", args.file.display());
+        ui::status(Icon::Dot, "Auditing", &args.file.display().to_string());
     }
 
     let content = std::fs::read_to_string(&args.file).map_err(|e| LoomError::Io {
@@ -477,7 +478,11 @@ fn run_tcl_wrap(args: TclWrapArgs, ctx: &GlobalContext) -> Result<(), LoomError>
     }
 
     if !ctx.quiet {
-        eprintln!("  Wrapping {} as generator ...", args.file.display());
+        ui::status(
+            Icon::Dot,
+            "Wrapping",
+            &format!("{} as generator", args.file.display()),
+        );
     }
 
     let gen_name = args.name.unwrap_or_else(|| {

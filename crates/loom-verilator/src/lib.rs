@@ -84,7 +84,7 @@ impl SimulatorPlugin for VerilatorBackend {
                 file.language,
                 FileLanguage::SystemVerilog | FileLanguage::Verilog
             ) {
-                cmd.arg(file.path.display().to_string().replace('\\', "/"));
+                cmd.arg(loom_core::util::to_tool_path(&file.path));
             }
         }
 

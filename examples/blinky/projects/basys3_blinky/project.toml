@@ -1,0 +1,15 @@
+[project]
+name = "basys3_blinky"
+top_module = "top"
+description = "Blinky demo targeting Digilent Basys 3 (Artix-7)"
+
+[target]
+part = "xc7a35tcpg236-1"
+backend = "vivado"
+
+[filesets.synth]
+files = ["src/top.sv"]
+constraints = ["constraints/basys3.xdc"]
+
+[dependencies]
+blinky = ">=1.0.0"

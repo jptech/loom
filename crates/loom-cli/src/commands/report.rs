@@ -1,4 +1,5 @@
 use clap::Args;
+use colored::Colorize;
 
 use loom_core::build::context::BuildContext;
 use loom_core::build::report::{report_path, BuildReport};
@@ -11,6 +12,7 @@ use loom_core::resolve::{
     WorkspaceDependencySource,
 };
 
+use crate::ui::{self, Icon};
 use crate::GlobalContext;
 
 #[derive(Args)]
@@ -91,7 +93,11 @@ pub fn run(args: ReportArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
             source: e,
         })?;
         if !ctx.quiet {
-            eprintln!("Report written to {}", out_path.display());
+            ui::status(
+                Icon::Check,
+                "Report",
+                &format!("written to {}", out_path.display()),
+            );
         }
     } else {
         println!("{}", text);
@@ -185,50 +191,56 @@ fn compute_metrics_diff(current: &BuildReport, previous: &BuildReport) -> serde_
 }
 
 fn print_metrics_diff(current: &BuildReport, previous: &BuildReport) {
-    println!("Metrics diff: {} vs previous", current.project);
-    println!();
+    ui::blank();
+    ui::section_header(&format!("Metrics diff: {} vs previous", current.project));
+    ui::blank();
 
     if let (Some(ct), Some(pt)) = (&current.metrics.timing, &previous.metrics.timing) {
-        println!("  Timing:");
-        print_delta("    WNS", ct.wns, pt.wns, "ns", true);
-        print_delta("    WHS", ct.whs, pt.whs, "ns", true);
+        ui::section_header("Timing");
+        print_delta("WNS", ct.wns, pt.wns, "ns", true);
+        print_delta("WHS", ct.whs, pt.whs, "ns", true);
+        ui::blank();
     }
 
     if let (Some(cu), Some(pu)) = (&current.metrics.utilization, &previous.metrics.utilization) {
-        println!("  Utilization:");
-        print_delta("    LUT", cu.lut_percent, pu.lut_percent, "%", false);
-        print_delta("    FF", cu.ff_percent, pu.ff_percent, "%", false);
-        print_delta("    BRAM", cu.bram_percent, pu.bram_percent, "%", false);
+        ui::section_header("Utilization");
+        print_delta("LUT", cu.lut_percent, pu.lut_percent, "%", false);
+        print_delta("FF", cu.ff_percent, pu.ff_percent, "%", false);
+        print_delta("BRAM", cu.bram_percent, pu.bram_percent, "%", false);
+        ui::blank();
     }
 
     if let (Some(cd), Some(pd)) = (
         current.metrics.duration_secs,
         previous.metrics.duration_secs,
     ) {
-        println!("  Duration:");
-        print_delta("    Time", cd, pd, "s", false);
+        ui::section_header("Duration");
+        print_delta("Time", cd, pd, "s", false);
+        ui::blank();
     }
 }
 
 fn print_delta(label: &str, current: f64, previous: f64, unit: &str, higher_is_better: bool) {
     let delta = current - previous;
-    let arrow = if delta > 0.001 {
+    let (icon, icon_str) = if delta > 0.001 {
         if higher_is_better {
-            "^"
+            (Icon::Check, ui::CHECK)
         } else {
-            "!"
+            (Icon::Warning, ui::WARNING)
         }
     } else if delta < -0.001 {
         if higher_is_better {
-            "!"
+            (Icon::Warning, ui::WARNING)
         } else {
-            "^"
+            (Icon::Check, ui::CHECK)
         }
     } else {
-        "="
+        (Icon::Dot, ui::DASH)
     };
-    println!(
-        "{}:  {:.3}{} (was {:.3}{}, delta {:+.3}{}) [{}]",
-        label, current, unit, previous, unit, delta, unit, arrow
+    let _ = icon; // used only for reference
+    let detail = format!(
+        "{:+.3}{}  (was {:.3}{}, \u{0394} {:+.3}{})  {}",
+        current, unit, previous, unit, delta, unit, icon_str
     );
+    eprintln!("    {:<6} {}", label, detail.dimmed());
 }
