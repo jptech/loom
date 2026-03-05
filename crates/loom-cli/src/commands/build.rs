@@ -17,8 +17,8 @@ use loom_core::resolve::lockfile::{
     check_staleness, generate_lockfile, load_lockfile, write_lockfile, LockfileStatus,
 };
 use loom_core::resolve::{
-    discover_members, find_project, find_workspace_root, load_all_components, resolve_project,
-    MemberKind, MemberPath, WorkspaceDependencySource,
+    discover_members, find_workspace_root, load_all_components, resolve_project,
+    resolve_project_selection, WorkspaceDependencySource,
 };
 
 use crate::backend_registry::get_backend;
@@ -87,15 +87,12 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     let members = discover_members(&workspace_root, &ws_manifest)?;
     let all_components = load_all_components(&members)?;
 
-    let project_name = args
-        .project
-        .clone()
-        .or_else(|| detect_project_from_cwd(&cwd, &members));
-
-    let (project_root, project_manifest) = match &project_name {
-        Some(name) => find_project(&members, Some(name))?,
-        None => find_project(&members, None)?,
-    };
+    let (project_root, project_manifest) = resolve_project_selection(
+        &members,
+        args.project.as_deref(),
+        Some(&cwd),
+        ws_manifest.settings.default_project.as_deref(),
+    )?;
 
     let errors = project_manifest.validate();
     if !errors.is_empty() {
@@ -569,18 +566,4 @@ fn count_build_artifacts(build_dir: &std::path::Path) -> (usize, usize) {
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "dcp"))
         .count();
     (reports, checkpoints)
-}
-
-fn detect_project_from_cwd(cwd: &std::path::Path, members: &[MemberPath]) -> Option<String> {
-    for member in members {
-        if member.kind == MemberKind::Project
-            && (cwd.starts_with(&member.path) || cwd == member.path)
-        {
-            let manifest_path = member.path.join("project.toml");
-            if let Ok(m) = loom_core::manifest::load_project_manifest(&manifest_path) {
-                return Some(m.project.name);
-            }
-        }
-    }
-    None
 }

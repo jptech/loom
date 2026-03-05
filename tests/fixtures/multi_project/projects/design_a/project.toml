@@ -1,0 +1,13 @@
+[project]
+name = "design_a"
+top_module = "top_a"
+
+[target]
+part = "xcvu9p-flga2104-2-i"
+backend = "vivado"
+
+[filesets.synth]
+files = ["src/top_a.sv"]
+
+[dependencies]
+shared_lib = ">=1.0.0"

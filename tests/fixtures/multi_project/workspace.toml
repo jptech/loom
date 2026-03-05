@@ -1,0 +1,3 @@
+[workspace]
+name = "multi_project_workspace"
+members = ["lib/*", "projects/*"]

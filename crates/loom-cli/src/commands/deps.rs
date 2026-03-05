@@ -3,8 +3,8 @@ use clap::{Args, Subcommand};
 use loom_core::error::LoomError;
 use loom_core::resolve::lockfile::{generate_lockfile, write_lockfile};
 use loom_core::resolve::{
-    discover_members, find_project, find_workspace_root, load_all_components, resolve_project,
-    MemberKind, WorkspaceDependencySource,
+    discover_members, find_workspace_root, load_all_components, resolve_project,
+    resolve_project_selection, WorkspaceDependencySource,
 };
 
 use crate::ui::{self, Icon};
@@ -32,6 +32,10 @@ pub struct DepsTreeArgs {
 pub struct DepsUpdateArgs {
     /// Specific dependency to update (default: all)
     pub dependency: Option<String>,
+
+    /// Project name (default: auto-detect)
+    #[arg(short = 'p', long)]
+    pub project: Option<String>,
 }
 
 pub fn run(cmd: DepsCommands, ctx: &GlobalContext) -> Result<(), LoomError> {
@@ -51,10 +55,12 @@ fn run_tree(args: DepsTreeArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     let members = discover_members(&workspace_root, &ws_manifest)?;
     let all_components = load_all_components(&members)?;
 
-    let (project_root, project_manifest) = match &args.project {
-        Some(name) => find_project(&members, Some(name))?,
-        None => find_project(&members, None)?,
-    };
+    let (project_root, project_manifest) = resolve_project_selection(
+        &members,
+        args.project.as_deref(),
+        Some(&cwd),
+        ws_manifest.settings.default_project.as_deref(),
+    )?;
 
     let source = WorkspaceDependencySource::new(all_components);
     let resolved = resolve_project(project_manifest, project_root, workspace_root, &source)?;
@@ -146,7 +152,7 @@ fn detect_languages(comp: &loom_core::resolve::resolver::ResolvedComponent) -> S
     }
 }
 
-fn run_update(_args: DepsUpdateArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
+fn run_update(args: DepsUpdateArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     let cwd = std::env::current_dir().map_err(|e| LoomError::Io {
         path: ".".into(),
         source: e,
@@ -159,21 +165,23 @@ fn run_update(_args: DepsUpdateArgs, ctx: &GlobalContext) -> Result<(), LoomErro
         ui::status(Icon::Dot, "Deps", "re-resolving dependencies...");
     }
 
-    if let Some(member) = members.iter().find(|m| m.kind == MemberKind::Project) {
-        let manifest_path = member.path.join("project.toml");
-        let project_manifest = loom_core::manifest::load_project_manifest(&manifest_path)?;
-        let source = WorkspaceDependencySource::new(all_components.clone());
-        let resolved = resolve_project(
-            project_manifest,
-            member.path.clone(),
-            workspace_root.clone(),
-            &source,
-        )?;
-        let lockfile = generate_lockfile(&resolved, &members)?;
-        write_lockfile(&lockfile, &workspace_root)?;
-        if !ctx.quiet {
-            ui::status(Icon::Check, "Deps", "lockfile updated");
-        }
+    let (project_root, project_manifest) = resolve_project_selection(
+        &members,
+        args.project.as_deref(),
+        Some(&cwd),
+        ws_manifest.settings.default_project.as_deref(),
+    )?;
+    let source = WorkspaceDependencySource::new(all_components);
+    let resolved = resolve_project(
+        project_manifest,
+        project_root,
+        workspace_root.clone(),
+        &source,
+    )?;
+    let lockfile = generate_lockfile(&resolved, &members)?;
+    write_lockfile(&lockfile, &workspace_root)?;
+    if !ctx.quiet {
+        ui::status(Icon::Check, "Deps", "lockfile updated");
     }
 
     Ok(())

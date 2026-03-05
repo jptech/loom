@@ -22,6 +22,11 @@ pub enum LoomError {
     #[error("Project '{name}' not found in workspace")]
     ProjectNotFound { name: String },
 
+    #[error(
+        "Multiple projects found in workspace: {names}. Specify one with -p/--project <name>."
+    )]
+    AmbiguousProject { names: String },
+
     #[error("Dependency '{name}' (constraint: {constraint}) not found in workspace")]
     DependencyNotFound { name: String, constraint: String },
 
@@ -105,6 +110,7 @@ impl LoomError {
             LoomError::LockfileParse { .. } => 2,
             LoomError::NoWorkspace { .. } => 2,
             LoomError::ProjectNotFound { .. } => 2,
+            LoomError::AmbiguousProject { .. } => 2,
             LoomError::GlobPattern { .. } => 2,
 
             // 3 = env error
