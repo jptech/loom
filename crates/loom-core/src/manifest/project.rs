@@ -88,6 +88,7 @@ pub struct BuildConfig {
     pub default_strategy: Option<String>,
     pub reports: Option<ReportConfig>,
     pub checkpoints: Option<CheckpointConfig>,
+    pub timing: Option<TimingConfig>,
 }
 
 /// Configuration for which Vivado reports to generate as files.
@@ -143,6 +144,24 @@ impl CheckpointConfig {
     }
     pub fn post_route(&self) -> bool {
         self.post_route.unwrap_or(true)
+    }
+}
+
+/// Configuration for clock display filtering in the terminal.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct TimingConfig {
+    /// Hide auto-generated clocks (MMCM/PLL) from the terminal clock table.
+    /// Default: false (show all, but dim generated clocks).
+    pub hide_generated: Option<bool>,
+    /// Exclude specific clock names from the terminal clock table.
+    #[serde(default)]
+    pub exclude_clocks: Vec<String>,
+}
+
+impl TimingConfig {
+    /// Whether to hide auto-generated clocks entirely.
+    pub fn hide_generated(&self) -> bool {
+        self.hide_generated.unwrap_or(false)
     }
 }
 
@@ -398,5 +417,55 @@ post_route = true
         assert!(checkpoints.post_place());
         assert!(checkpoints.post_route());
         assert!(!checkpoints.post_opt()); // not set, defaults to false
+    }
+
+    #[test]
+    fn test_timing_config_defaults() {
+        let config = TimingConfig::default();
+        assert!(!config.hide_generated());
+        assert!(config.exclude_clocks.is_empty());
+    }
+
+    #[test]
+    fn test_parse_timing_config() {
+        let toml_str = r#"
+[project]
+name = "test"
+top_module = "top"
+
+[target]
+part = "xc7a35t"
+backend = "vivado"
+
+[build.timing]
+hide_generated = true
+exclude_clocks = ["clk_fb", "clk_div2"]
+"#;
+        let manifest: ProjectManifest = toml::from_str(toml_str).unwrap();
+        let timing = manifest.build.as_ref().unwrap().timing.as_ref().unwrap();
+        assert!(timing.hide_generated());
+        assert_eq!(timing.exclude_clocks.len(), 2);
+        assert!(timing.exclude_clocks.contains(&"clk_fb".to_string()));
+        assert!(timing.exclude_clocks.contains(&"clk_div2".to_string()));
+    }
+
+    #[test]
+    fn test_parse_timing_config_partial() {
+        let toml_str = r#"
+[project]
+name = "test"
+top_module = "top"
+
+[target]
+part = "xc7a35t"
+backend = "vivado"
+
+[build.timing]
+exclude_clocks = ["clk_fb"]
+"#;
+        let manifest: ProjectManifest = toml::from_str(toml_str).unwrap();
+        let timing = manifest.build.as_ref().unwrap().timing.as_ref().unwrap();
+        assert!(!timing.hide_generated()); // default false
+        assert_eq!(timing.exclude_clocks.len(), 1);
     }
 }

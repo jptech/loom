@@ -90,6 +90,10 @@ pub struct ClockTiming {
     /// Realized Fmax in MHz = 1000 / (period_ns - WNS).
     /// Positive WNS (slack) → faster than target; negative WNS (violation) → slower.
     pub achieved_mhz: Option<f64>,
+    /// Whether this clock is auto-generated (MMCM, PLL, clock divider).
+    /// Detected from Vivado's `report_clocks` Attributes column (G = Generated).
+    #[serde(default)]
+    pub is_generated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

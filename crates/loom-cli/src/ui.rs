@@ -147,22 +147,46 @@ pub fn timing_line(label: &str, wns: f64, whs: f64, is_last: bool) {
 // ── Clock table ─────────────────────────────────────────────────────
 
 /// Print a per-clock timing table with target/achieved fmax and slack values.
-pub fn clock_table(clocks: &[loom_core::build::report::ClockTiming], is_last: bool) {
-    if clocks.is_empty() {
+///
+/// Clocks are filtered based on the timing config:
+/// - `hide_generated`: skip auto-generated clocks (MMCM/PLL feedback, etc.)
+/// - `exclude_clocks`: skip clocks matching these names
+/// - Otherwise, generated clocks are dimmed to reduce visual noise.
+pub fn clock_table(
+    clocks: &[loom_core::build::report::ClockTiming],
+    is_last: bool,
+    hide_generated: bool,
+    exclude_clocks: &[String],
+) {
+    // Filter clocks based on config
+    let visible: Vec<_> = clocks
+        .iter()
+        .filter(|clk| {
+            if hide_generated && clk.is_generated {
+                return false;
+            }
+            if exclude_clocks.iter().any(|name| name == &clk.name) {
+                return false;
+            }
+            true
+        })
+        .collect();
+
+    if visible.is_empty() {
         return;
     }
-    let prefix = if is_last { " " } else { TREE_VERT };
+    // Header always uses vertical bar — clock data rows follow below
     eprintln!(
         "    {} {:<16} {:>10} {:>10}  {:>9}  {:>9}",
-        prefix,
+        TREE_VERT,
         "Clock".dimmed(),
         "Target".dimmed(),
         "Achieved".dimmed(),
         "WNS".dimmed(),
         "WHS".dimmed()
     );
-    for (i, clk) in clocks.iter().enumerate() {
-        let is_last_clk = i == clocks.len() - 1;
+    for (i, clk) in visible.iter().enumerate() {
+        let is_last_clk = i == visible.len() - 1;
         let clk_prefix = if is_last_clk && is_last {
             "\u{2514}"
         } else {
@@ -186,10 +210,24 @@ pub fn clock_table(clocks: &[loom_core::build::report::ClockTiming], is_last: bo
         } else {
             CROSS.red().to_string()
         };
-        eprintln!(
-            "    {} {:<16} {:>10} {:>10}  {:>+7.3}ns {} {:>+7.3}ns {}",
-            clk_prefix, clk.name, target, achieved, clk.wns, wns_icon, clk.whs, whs_icon
-        );
+
+        if clk.is_generated {
+            // Dim generated clocks to reduce visual noise
+            eprintln!(
+                "    {} {}",
+                clk_prefix,
+                format!(
+                    "{:<16} {:>10} {:>10}  {:>+7.3}ns {} {:>+7.3}ns {}",
+                    clk.name, target, achieved, clk.wns, wns_icon, clk.whs, whs_icon
+                )
+                .dimmed()
+            );
+        } else {
+            eprintln!(
+                "    {} {:<16} {:>10} {:>10}  {:>+7.3}ns {} {:>+7.3}ns {}",
+                clk_prefix, clk.name, target, achieved, clk.wns, wns_icon, clk.whs, whs_icon
+            );
+        }
     }
 }
 

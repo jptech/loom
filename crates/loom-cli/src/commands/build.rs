@@ -360,7 +360,16 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
                 let has_clocks = !timing.clocks.is_empty();
                 ui::timing_line(label, timing.wns, timing.whs, !has_clocks);
                 if has_clocks {
-                    ui::clock_table(&timing.clocks, true);
+                    let timing_cfg = resolved
+                        .project
+                        .build
+                        .as_ref()
+                        .and_then(|b| b.timing.as_ref());
+                    let hide_gen = timing_cfg.is_some_and(|t| t.hide_generated());
+                    let exclude = timing_cfg
+                        .map(|t| t.exclude_clocks.as_slice())
+                        .unwrap_or(&[]);
+                    ui::clock_table(&timing.clocks, true, hide_gen, exclude);
                 }
             }
         }
@@ -501,6 +510,27 @@ fn handle_build_result(
             if let Some(bit) = &build_result.bitstream_path {
                 ui::summary_detail("Bitstream", &bit.display().to_string());
             }
+            let (report_count, checkpoint_count) = count_build_artifacts(&build_context.build_dir);
+            if report_count > 0 {
+                ui::summary_detail(
+                    "Reports",
+                    &format!(
+                        "{} files in {}",
+                        report_count,
+                        build_context.build_dir.display()
+                    ),
+                );
+            }
+            if checkpoint_count > 0 {
+                ui::summary_detail(
+                    "Checkpoints",
+                    &format!(
+                        "{} files in {}",
+                        checkpoint_count,
+                        build_context.build_dir.display()
+                    ),
+                );
+            }
         }
         Ok(())
     } else if build_result.failure_phase.as_deref() == Some("interrupted") {
@@ -521,6 +551,24 @@ fn handle_build_result(
             log_path: log.unwrap_or_else(|| build_context.build_dir.join("build.log")),
         })
     }
+}
+
+/// Count report (.rpt) and checkpoint (.dcp) files in the build directory.
+fn count_build_artifacts(build_dir: &std::path::Path) -> (usize, usize) {
+    let entries: Vec<_> = std::fs::read_dir(build_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
+    let reports = entries
+        .iter()
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "rpt"))
+        .count();
+    let checkpoints = entries
+        .iter()
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "dcp"))
+        .count();
+    (reports, checkpoints)
 }
 
 fn detect_project_from_cwd(cwd: &std::path::Path, members: &[MemberPath]) -> Option<String> {

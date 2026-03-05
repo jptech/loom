@@ -135,6 +135,13 @@ pub fn generate_tcl(
     writeln!(script, "puts \"LOOM_MARKER:REPORT_UTIL_END\"")?;
     writeln!(script)?;
 
+    // Post-synthesis clock report (identifies generated clocks)
+    writeln!(script, "# Clock report (generated clock detection)")?;
+    writeln!(script, "puts \"LOOM_MARKER:REPORT_CLOCKS_BEGIN\"")?;
+    writeln!(script, "report_clocks")?;
+    writeln!(script, "puts \"LOOM_MARKER:REPORT_CLOCKS_END\"")?;
+    writeln!(script)?;
+
     // Post-synthesis report files
     write_report_files_with_activity(&mut script, &report_cfg, &build_dir_tcl, "synth")?;
 

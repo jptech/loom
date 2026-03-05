@@ -1,5 +1,5 @@
 use crate::build::report::{ClockTiming, TimingMetrics, UtilizationMetrics};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Events emitted during a build for live progress reporting.
 #[derive(Debug, Clone)]
@@ -57,6 +57,8 @@ pub struct VivadoOutputParser {
     /// Vivado may emit multiple `Time (s):` lines per phase; we buffer the latest
     /// and only emit `PhaseCompleted` on phase transition or "completed successfully".
     pending_completion: Option<(String, f64, Option<f64>)>,
+    /// Clock names detected as auto-generated (from `report_clocks` Attributes column).
+    generated_clocks: HashSet<String>,
 }
 
 impl VivadoOutputParser {
@@ -70,6 +72,7 @@ impl VivadoOutputParser {
             last_memory: None,
             phase_start: None,
             pending_completion: None,
+            generated_clocks: HashSet::new(),
         }
     }
 
@@ -230,19 +233,27 @@ impl VivadoOutputParser {
         events
     }
 
-    fn process_marker(&self, marker_type: &str, lines: &[String]) -> Option<BuildEvent> {
+    fn process_marker(&mut self, marker_type: &str, lines: &[String]) -> Option<BuildEvent> {
         match marker_type {
             "REPORT_UTIL" => parse_utilization_report(lines).map(BuildEvent::UtilizationAvailable),
+            "REPORT_CLOCKS" => {
+                self.generated_clocks = parse_clocks_report(lines);
+                None // No event emitted — data stored for later use
+            }
             "POST_PLACE_TIMING" => {
-                parse_timing_report(lines).map(|timing| BuildEvent::TimingAvailable {
-                    stage: "post_place".to_string(),
-                    timing,
+                parse_timing_report(lines, &self.generated_clocks).map(|timing| {
+                    BuildEvent::TimingAvailable {
+                        stage: "post_place".to_string(),
+                        timing,
+                    }
                 })
             }
             "POST_ROUTE_TIMING" => {
-                parse_timing_report(lines).map(|timing| BuildEvent::TimingAvailable {
-                    stage: "post_route".to_string(),
-                    timing,
+                parse_timing_report(lines, &self.generated_clocks).map(|timing| {
+                    BuildEvent::TimingAvailable {
+                        stage: "post_route".to_string(),
+                        timing,
+                    }
                 })
             }
             _ => None,
@@ -607,7 +618,10 @@ enum IntraSubsection {
 /// - Design-level WNS/TNS/WHS/THS from the "Design Timing Summary" section
 /// - Per-clock timing from "Intra Clock Table" and "Inter Clock Table"
 /// - Clock periods from "Clock Summary" section
-fn parse_timing_report(lines: &[String]) -> Option<TimingMetrics> {
+fn parse_timing_report(
+    lines: &[String],
+    generated_clocks: &HashSet<String>,
+) -> Option<TimingMetrics> {
     let mut wns: Option<f64> = None;
     let mut tns: Option<f64> = None;
     let mut whs: Option<f64> = None;
@@ -785,6 +799,7 @@ fn parse_timing_report(lines: &[String]) -> Option<TimingMetrics> {
             failing_endpoints: setup_fail + hold_fail,
             total_endpoints: *setup_total,
             achieved_mhz,
+            is_generated: generated_clocks.contains(name),
         });
     }
     // Sort clocks by name for deterministic ordering
@@ -861,6 +876,65 @@ fn looks_like_timing_data(line: &str) -> bool {
     }
     let first_char = trimmed.chars().next().unwrap();
     first_char.is_ascii_digit() || first_char == '-'
+}
+
+/// Parse Vivado's `report_clocks` output to identify generated clocks.
+///
+/// Returns the set of clock names that have the `G` (Generated) attribute.
+/// Vivado format:
+/// ```text
+/// Clock               Period(ns)  Waveform(ns)         Attributes  Sources
+/// -----               ----------  ------------         ----------  -------
+/// clk_24m_unbuf          41.667  {0.000 20.833}       P           {clk_24m_unbuf}
+/// clk_fb                 10.000  {0.000 5.000}         P,G         {mmcm_inst/CLKFBOUT}
+/// ```
+fn parse_clocks_report(lines: &[String]) -> HashSet<String> {
+    let mut generated = HashSet::new();
+    let mut saw_header = false;
+    let mut attr_col_start: Option<usize> = None;
+
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Detect header row to find Attributes column position
+        if trimmed.starts_with("Clock") && trimmed.contains("Attributes") {
+            attr_col_start = line.find("Attributes");
+            saw_header = true;
+            continue;
+        }
+
+        // Skip separator line
+        if trimmed.starts_with("-----") {
+            continue;
+        }
+
+        // Parse data rows
+        if saw_header {
+            if let Some(attr_start) = attr_col_start {
+                // Extract clock name (first whitespace-delimited token)
+                let clock_name = trimmed.split_whitespace().next().unwrap_or("");
+                if clock_name.is_empty()
+                    || clock_name.starts_with(|c: char| c.is_ascii_digit() || c == '-')
+                {
+                    continue;
+                }
+
+                // Extract attributes column by position
+                if line.len() > attr_start {
+                    let attr_region = &line[attr_start..];
+                    let attr_val = attr_region.split_whitespace().next().unwrap_or("");
+                    if attr_val.contains('G') {
+                        generated.insert(clock_name.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    generated
 }
 
 #[cfg(test)]
@@ -1578,6 +1652,112 @@ mod tests {
                 );
             }
             _ => panic!("Expected PhaseCompleted"),
+        }
+    }
+
+    #[test]
+    fn test_parse_clocks_report() {
+        let lines: Vec<String> = vec![
+            "".to_string(),
+            "Clock Report".to_string(),
+            "".to_string(),
+            "Clock               Period(ns)  Waveform(ns)         Attributes  Sources".to_string(),
+            "-----               ----------  ------------         ----------  -------".to_string(),
+            "clk_24m_unbuf          41.667  {0.000 20.833}       P           {clk_24m_unbuf}"
+                .to_string(),
+            "clk_fb                 10.000  {0.000 5.000}         P,G         {mmcm_inst/CLKFBOUT}"
+                .to_string(),
+            "sys_clk                10.000  {0.000 5.000}         P,G         {mmcm_inst/CLKOUT0}"
+                .to_string(),
+        ];
+
+        let generated = parse_clocks_report(&lines);
+        assert_eq!(generated.len(), 2);
+        assert!(generated.contains("clk_fb"));
+        assert!(generated.contains("sys_clk"));
+        assert!(!generated.contains("clk_24m_unbuf"));
+    }
+
+    #[test]
+    fn test_parse_clocks_report_no_generated() {
+        let lines: Vec<String> = vec![
+            "Clock               Period(ns)  Waveform(ns)         Attributes  Sources".to_string(),
+            "-----               ----------  ------------         ----------  -------".to_string(),
+            "sys_clk                10.000  {0.000 5.000}         P           {sys_clk}"
+                .to_string(),
+        ];
+
+        let generated = parse_clocks_report(&lines);
+        assert!(generated.is_empty());
+    }
+
+    #[test]
+    fn test_generated_clock_annotation() {
+        let mut parser = VivadoOutputParser::new();
+
+        // First, feed report_clocks to teach the parser which clocks are generated
+        parser.parse_line("LOOM_MARKER:REPORT_CLOCKS_BEGIN");
+        parser
+            .parse_line("Clock               Period(ns)  Waveform(ns)         Attributes  Sources");
+        parser
+            .parse_line("-----               ----------  ------------         ----------  -------");
+        parser.parse_line(
+            "clk_24m_unbuf          41.667  {0.000 20.833}       P           {clk_24m_unbuf}",
+        );
+        parser.parse_line(
+            "clk_fb                 10.000  {0.000 5.000}         P,G         {mmcm_inst/CLKFBOUT}",
+        );
+        parser.parse_line("LOOM_MARKER:REPORT_CLOCKS_END");
+
+        // Now feed a timing report with both clocks
+        parser.parse_line("LOOM_MARKER:POST_ROUTE_TIMING_BEGIN");
+        let timing_lines = [
+            "    WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints",
+            "    -------      -------  ---------------------  -------------------",
+            "      7.085        0.000                      0                  124",
+            "",
+            "    WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints",
+            "    -------      -------  ---------------------  -------------------",
+            "      0.308        0.000                      0                   98",
+            "",
+            "| Clock Summary",
+            "",
+            "Clock        Waveform(ns)       Period(ns)      Frequency(MHz)",
+            "-----        ------------       ----------      --------------",
+            "clk_24m_unbuf {0.000 20.833}    41.667          24.000",
+            "clk_fb       {0.000 5.000}      10.000          100.000",
+            "",
+            "| Intra Clock Table",
+            "",
+            "Clock              WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints",
+            "-----              -------      -------  ---------------------  -------------------",
+            "clk_24m_unbuf        7.085        0.000                      0                   80",
+            "clk_fb               8.751        0.000                      0                   44",
+            "",
+            "Clock              WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints",
+            "-----              -------      -------  ---------------------  -------------------",
+            "clk_24m_unbuf        0.308        0.000                      0                   60",
+            "clk_fb               0.042        0.000                      0                   38",
+        ];
+        for line in &timing_lines {
+            parser.parse_line(line);
+        }
+        let events = parser.parse_line("LOOM_MARKER:POST_ROUTE_TIMING_END");
+
+        match &events[0] {
+            BuildEvent::TimingAvailable { timing, .. } => {
+                assert_eq!(timing.clocks.len(), 2);
+                let unbuf = timing
+                    .clocks
+                    .iter()
+                    .find(|c| c.name == "clk_24m_unbuf")
+                    .unwrap();
+                assert!(!unbuf.is_generated, "clk_24m_unbuf should not be generated");
+
+                let fb = timing.clocks.iter().find(|c| c.name == "clk_fb").unwrap();
+                assert!(fb.is_generated, "clk_fb should be marked as generated");
+            }
+            _ => panic!("Expected TimingAvailable"),
         }
     }
 }
