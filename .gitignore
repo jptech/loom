@@ -26,3 +26,9 @@ Thumbs.db
 __pycache__/
 *.pyc
 *.egg-info/
+
+# Claude Code
+.claude/worktrees/
+.claude/settings.local.json
+.claude/store/
+.claude/todos.md
