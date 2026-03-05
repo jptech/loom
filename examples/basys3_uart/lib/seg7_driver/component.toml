@@ -1,0 +1,10 @@
+[component]
+name = "demo/seg7_driver"
+version = "1.0.0"
+description = "4-digit 7-segment display controller for Basys 3"
+
+[filesets.synth]
+files = ["rtl/hex_to_seg7.sv", "rtl/seg7_controller.sv"]
+
+[dependencies]
+counter = ">=1.0.0"

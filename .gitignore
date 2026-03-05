@@ -1,0 +1,28 @@
+/target/
+.build/
+*.bit
+*.bin
+*.mcs
+*.ltx
+
+# Vivado working files
+*.jou
+*.str
+*.wdb
+*.wdf
+.Xil/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/

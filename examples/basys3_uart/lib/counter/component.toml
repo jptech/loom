@@ -1,0 +1,7 @@
+[component]
+name = "demo/counter"
+version = "1.0.0"
+description = "Parameterizable N-bit counter"
+
+[filesets.synth]
+files = ["rtl/counter.sv"]

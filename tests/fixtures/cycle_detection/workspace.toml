@@ -1,0 +1,3 @@
+[workspace]
+name = "cycle_detection_test"
+members = ["lib/*"]

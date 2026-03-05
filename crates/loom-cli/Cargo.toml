@@ -1,0 +1,34 @@
+[package]
+name = "loom-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "loom"
+path = "src/main.rs"
+
+[dependencies]
+loom-core = { path = "../loom-core" }
+loom-vivado = { path = "../loom-vivado" }
+loom-quartus = { path = "../loom-quartus" }
+loom-xsim = { path = "../loom-xsim" }
+loom-verilator = { path = "../loom-verilator" }
+loom-yosys = { path = "../loom-yosys" }
+loom-radiant = { path = "../loom-radiant" }
+loom-icarus = { path = "../loom-icarus" }
+loom-questa = { path = "../loom-questa" }
+loom-vcs = { path = "../loom-vcs" }
+loom-xcelium = { path = "../loom-xcelium" }
+clap.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+colored.workspace = true
+indicatif.workspace = true
+quick-xml.workspace = true
+walkdir.workspace = true
+ctrlc.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

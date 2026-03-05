@@ -1,0 +1,9 @@
+[component]
+name = "testorg/cycle_a"
+version = "1.0.0"
+
+[filesets.synth]
+files = ["rtl/cycle_a.sv"]
+
+[dependencies]
+cycle_b = ">=1.0.0"

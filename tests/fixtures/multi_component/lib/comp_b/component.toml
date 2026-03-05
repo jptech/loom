@@ -1,0 +1,6 @@
+[component]
+name = "testorg/comp_b"
+version = "1.0.0"
+
+[filesets.synth]
+files = ["rtl/comp_b.sv"]

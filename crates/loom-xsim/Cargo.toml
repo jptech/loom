@@ -1,0 +1,12 @@
+[package]
+name = "loom-xsim"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+loom-core = { path = "../loom-core" }
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+regex.workspace = true
