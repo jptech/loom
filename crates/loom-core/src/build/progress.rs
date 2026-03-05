@@ -10,7 +10,7 @@ pub enum BuildEvent {
     PhaseCompleted {
         phase: String,
         elapsed_secs: f64,
-        memory_mb: f64,
+        memory_mb: Option<f64>,
     },
     UtilizationAvailable(UtilizationMetrics),
     TimingAvailable {
@@ -34,6 +34,10 @@ pub enum BuildEvent {
         warnings: u32,
     },
     VerboseLine(String),
+    /// A non-phase activity is in progress (e.g., writing reports, saving checkpoint).
+    Activity(String),
+    /// The current activity has completed.
+    ActivityDone,
 }
 
 /// Stateful line-by-line parser for Vivado stdout output.
@@ -52,7 +56,7 @@ pub struct VivadoOutputParser {
     /// Pending phase completion data: (phase, elapsed, memory).
     /// Vivado may emit multiple `Time (s):` lines per phase; we buffer the latest
     /// and only emit `PhaseCompleted` on phase transition or "completed successfully".
-    pending_completion: Option<(String, f64, f64)>,
+    pending_completion: Option<(String, f64, Option<f64>)>,
 }
 
 impl VivadoOutputParser {
@@ -77,6 +81,16 @@ impl VivadoOutputParser {
     /// Parse a single line of Vivado stdout and return any events produced.
     pub fn parse_line(&mut self, line: &str) -> Vec<BuildEvent> {
         let mut events = Vec::new();
+
+        // Check for activity markers (single-line, not accumulated)
+        if let Some(rest) = line.strip_prefix("LOOM_MARKER:ACTIVITY:") {
+            events.push(BuildEvent::Activity(rest.trim().to_string()));
+            return events;
+        }
+        if line.contains("LOOM_MARKER:ACTIVITY_DONE") {
+            events.push(BuildEvent::ActivityDone);
+            return events;
+        }
 
         // Check for LOOM_MARKER boundaries
         if let Some(marker) = parse_marker_begin(line) {
@@ -127,7 +141,8 @@ impl VivadoOutputParser {
         // Phase completion with summary time line (e.g., "synth_design: Time (s): ...")
         // Buffer the latest values — Vivado may emit multiple Time lines per phase.
         if let Some((phase, elapsed, memory)) = detect_phase_time_memory(line) {
-            self.pending_completion = Some((phase, elapsed, memory));
+            let memory_opt = if memory > 0.0 { Some(memory) } else { None };
+            self.pending_completion = Some((phase, elapsed, memory_opt));
         }
 
         // "X completed successfully" — if pending Time data exists for this phase,
@@ -148,11 +163,10 @@ impl VivadoOutputParser {
                         .phase_start
                         .map(|s| s.elapsed().as_secs_f64())
                         .unwrap_or(0.0);
-                    let memory = self.last_memory.unwrap_or(0.0);
                     events.push(BuildEvent::PhaseCompleted {
                         phase,
                         elapsed_secs: elapsed,
-                        memory_mb: memory,
+                        memory_mb: self.last_memory,
                     });
                 }
                 // If pending exists for this phase, do nothing — flush_pending
@@ -908,7 +922,7 @@ mod tests {
                 // Wall-clock elapsed (will be small in tests, but must be >= 0)
                 assert!(*elapsed_secs >= 0.0);
                 // Memory is from Vivado's report
-                assert!((memory_mb - 1912.547).abs() < 0.01);
+                assert!((memory_mb.unwrap() - 1912.547).abs() < 0.01);
             }
             _ => panic!("Expected PhaseCompleted"),
         }
@@ -940,7 +954,7 @@ mod tests {
                 // Wall-clock elapsed (will be small in tests, but must be >= 0)
                 assert!(*elapsed_secs >= 0.0);
                 // Memory is from Vivado's report
-                assert!((memory_mb - 2049.0).abs() < 0.01);
+                assert!((memory_mb.unwrap() - 2049.0).abs() < 0.01);
             }
             _ => panic!("Expected PhaseCompleted"),
         }
@@ -1054,7 +1068,7 @@ mod tests {
             .unwrap();
         match completed {
             BuildEvent::PhaseCompleted { memory_mb, .. } => {
-                assert!((*memory_mb - 2027.18).abs() < 0.01);
+                assert!((memory_mb.unwrap() - 2027.18).abs() < 0.01);
             }
             _ => unreachable!(),
         }
@@ -1228,7 +1242,7 @@ mod tests {
                 // Wall-clock elapsed (small but non-negative in tests)
                 assert!(*elapsed_secs >= 0.0);
                 // Memory from latest Vivado Time line
-                assert!((*memory_mb - 1922.0).abs() < 0.01);
+                assert!((memory_mb.unwrap() - 1922.0).abs() < 0.01);
             }
             _ => panic!("Expected PhaseCompleted"),
         }
@@ -1510,6 +1524,60 @@ mod tests {
                 assert!((slow.achieved_mhz.unwrap() - 200.0).abs() < 0.1);
             }
             _ => panic!("Expected TimingAvailable"),
+        }
+    }
+
+    #[test]
+    fn test_activity_markers() {
+        let mut parser = VivadoOutputParser::new();
+
+        // Activity start
+        let events = parser.parse_line("LOOM_MARKER:ACTIVITY:Writing post-synthesis reports");
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            BuildEvent::Activity(msg) => {
+                assert_eq!(msg, "Writing post-synthesis reports");
+            }
+            _ => panic!("Expected Activity"),
+        }
+
+        // Activity done
+        let events = parser.parse_line("LOOM_MARKER:ACTIVITY_DONE");
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], BuildEvent::ActivityDone));
+
+        // Checkpoint activity
+        let events = parser.parse_line("LOOM_MARKER:ACTIVITY:Saving post-placement checkpoint");
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            BuildEvent::Activity(msg) => {
+                assert_eq!(msg, "Saving post-placement checkpoint");
+            }
+            _ => panic!("Expected Activity"),
+        }
+    }
+
+    #[test]
+    fn test_phase_completed_no_memory() {
+        let mut parser = VivadoOutputParser::new();
+
+        // Start bitstream phase
+        parser.parse_line("Command: write_bitstream");
+
+        // Complete without any Time (s): line → no memory data
+        let events = parser.parse_line("write_bitstream completed successfully");
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            BuildEvent::PhaseCompleted {
+                phase, memory_mb, ..
+            } => {
+                assert_eq!(phase, "bitstream");
+                assert!(
+                    memory_mb.is_none(),
+                    "Memory should be None when not reported"
+                );
+            }
+            _ => panic!("Expected PhaseCompleted"),
         }
     }
 }

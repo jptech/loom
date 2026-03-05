@@ -293,6 +293,12 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     let spinner: Mutex<Option<ProgressBar>> = Mutex::new(None);
     let build_start = std::time::Instant::now();
 
+    // Pre-set spinner to cover Vivado startup delay (replaced by first Activity/Phase event)
+    if show_progress {
+        let sp = ui::create_spinner("Build");
+        *spinner.lock().unwrap() = Some(sp);
+    }
+
     let progress_callback = |event: BuildEvent| match &event {
         BuildEvent::VerboseLine(line) => {
             if verbose_mode {
@@ -317,12 +323,23 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
                 if let Some(sp) = spinner.lock().unwrap().take() {
                     sp.finish_and_clear();
                 }
-                ui::status_with_metrics(
-                    Icon::Check,
-                    &ui::capitalize(phase),
-                    *elapsed_secs,
-                    *memory_mb as u64,
-                );
+                match memory_mb {
+                    Some(mb) => {
+                        ui::status_with_metrics(
+                            Icon::Check,
+                            &ui::capitalize(phase),
+                            *elapsed_secs,
+                            *mb as u64,
+                        );
+                    }
+                    None => {
+                        ui::status(
+                            Icon::Check,
+                            &ui::capitalize(phase),
+                            &ui::format_duration(*elapsed_secs),
+                        );
+                    }
+                }
             }
         }
         BuildEvent::UtilizationAvailable(util) => {
@@ -380,6 +397,22 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
                     ),
                     true,
                 );
+            }
+        }
+        BuildEvent::Activity(msg) => {
+            if show_progress {
+                if let Some(sp) = spinner.lock().unwrap().take() {
+                    sp.finish_and_clear();
+                }
+                let sp = ui::create_spinner(msg);
+                *spinner.lock().unwrap() = Some(sp);
+            }
+        }
+        BuildEvent::ActivityDone => {
+            if show_progress {
+                if let Some(sp) = spinner.lock().unwrap().take() {
+                    sp.finish_and_clear();
+                }
             }
         }
     };

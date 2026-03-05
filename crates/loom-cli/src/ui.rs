@@ -68,14 +68,14 @@ pub fn status(icon: Icon, label: &str, detail: &str) {
     }
 }
 
-/// Print a status line with timing and memory: `  ✓ Label         27s    512 MB`
+/// Print a status line with timing and memory: `  ✓ Label         27s    1.9 GB`
 pub fn status_with_metrics(icon: Icon, label: &str, secs: f64, mb: u64) {
     eprintln!(
-        "  {} {:<14} {:>6}   {:>4} MB",
+        "  {} {:<14} {:>6}   {:>8}",
         icon.render(),
         label,
         format_duration(secs),
-        mb
+        format_memory(mb),
     );
 }
 
@@ -223,6 +223,18 @@ pub fn format_duration(secs: f64) -> String {
         format!("{:.1}s", secs)
     } else {
         format!("{}s", s)
+    }
+}
+
+// ── Memory formatting ────────────────────────────────────────────────
+
+/// Format megabytes as a compact memory string with appropriate units.
+/// `512 MB`, `2.1 GB`, `16.0 GB`
+pub fn format_memory(mb: u64) -> String {
+    if mb >= 1024 {
+        format!("{:.1} GB", mb as f64 / 1024.0)
+    } else {
+        format!("{} MB", mb)
     }
 }
 
@@ -385,5 +397,16 @@ mod tests {
         assert!(!Icon::Cross.render().is_empty());
         assert!(!Icon::Dot.render().is_empty());
         assert!(!Icon::Warning.render().is_empty());
+    }
+
+    #[test]
+    fn test_format_memory() {
+        assert_eq!(format_memory(0), "0 MB");
+        assert_eq!(format_memory(512), "512 MB");
+        assert_eq!(format_memory(1023), "1023 MB");
+        assert_eq!(format_memory(1024), "1.0 GB");
+        assert_eq!(format_memory(2113), "2.1 GB");
+        assert_eq!(format_memory(10240), "10.0 GB");
+        assert_eq!(format_memory(32768), "32.0 GB");
     }
 }

@@ -33,6 +33,13 @@ pub fn generate_tcl(
     writeln!(script)?;
 
     // Read source files
+    if !filesets.synth_files.is_empty() {
+        writeln!(
+            script,
+            "puts \"LOOM_MARKER:ACTIVITY:Loading source files ({})\"",
+            filesets.synth_files.len()
+        )?;
+    }
     writeln!(script, "# Read source files (dependency order)")?;
     for file in &filesets.synth_files {
         let tcl_path = to_tcl_path(&file.path);
@@ -50,6 +57,9 @@ pub fn generate_tcl(
             }
         };
         writeln!(script, "{}", cmd)?;
+    }
+    if !filesets.synth_files.is_empty() {
+        writeln!(script, "puts \"LOOM_MARKER:ACTIVITY_DONE\"")?;
     }
     writeln!(script)?;
 
@@ -72,6 +82,7 @@ pub fn generate_tcl(
 
     // Read constraints
     if !filesets.constraint_files.is_empty() {
+        writeln!(script, "puts \"LOOM_MARKER:ACTIVITY:Loading constraints\"")?;
         writeln!(
             script,
             "# Read constraints (component-scoped first, then global)"
@@ -88,6 +99,7 @@ pub fn generate_tcl(
             };
             writeln!(script, "{}", cmd)?;
         }
+        writeln!(script, "puts \"LOOM_MARKER:ACTIVITY_DONE\"")?;
         writeln!(script)?;
     }
 
@@ -124,15 +136,20 @@ pub fn generate_tcl(
     writeln!(script)?;
 
     // Post-synthesis report files
-    write_report_files(&mut script, &report_cfg, &build_dir_tcl, "synth")?;
+    write_report_files_with_activity(&mut script, &report_cfg, &build_dir_tcl, "synth")?;
 
     // Post-synthesis checkpoint
     if checkpoint_cfg.post_synth() {
         writeln!(
             script,
+            "puts \"LOOM_MARKER:ACTIVITY:Saving post-synthesis checkpoint\""
+        )?;
+        writeln!(
+            script,
             "write_checkpoint -force {{{}/post_synth.dcp}}",
             build_dir_tcl
         )?;
+        writeln!(script, "puts \"LOOM_MARKER:ACTIVITY_DONE\"")?;
         writeln!(script)?;
     }
 
@@ -144,9 +161,14 @@ pub fn generate_tcl(
     if checkpoint_cfg.post_opt() {
         writeln!(
             script,
+            "puts \"LOOM_MARKER:ACTIVITY:Saving post-optimization checkpoint\""
+        )?;
+        writeln!(
+            script,
             "write_checkpoint -force {{{}/post_opt.dcp}}",
             build_dir_tcl
         )?;
+        writeln!(script, "puts \"LOOM_MARKER:ACTIVITY_DONE\"")?;
     }
 
     writeln!(script, "place_design")?;
@@ -163,9 +185,14 @@ pub fn generate_tcl(
     if report_cfg.timing() {
         writeln!(
             script,
+            "puts \"LOOM_MARKER:ACTIVITY:Writing post-placement reports\""
+        )?;
+        writeln!(
+            script,
             "report_timing_summary -file {{{}/timing_place.rpt}}",
             build_dir_tcl
         )?;
+        writeln!(script, "puts \"LOOM_MARKER:ACTIVITY_DONE\"")?;
         writeln!(script)?;
     }
 
@@ -173,9 +200,14 @@ pub fn generate_tcl(
     if checkpoint_cfg.post_place() {
         writeln!(
             script,
+            "puts \"LOOM_MARKER:ACTIVITY:Saving post-placement checkpoint\""
+        )?;
+        writeln!(
+            script,
             "write_checkpoint -force {{{}/post_place.dcp}}",
             build_dir_tcl
         )?;
+        writeln!(script, "puts \"LOOM_MARKER:ACTIVITY_DONE\"")?;
         writeln!(script)?;
     }
 
@@ -190,15 +222,20 @@ pub fn generate_tcl(
     writeln!(script)?;
 
     // Post-route report files
-    write_report_files(&mut script, &report_cfg, &build_dir_tcl, "route")?;
+    write_report_files_with_activity(&mut script, &report_cfg, &build_dir_tcl, "route")?;
 
     // Post-route checkpoint
     if checkpoint_cfg.post_route() {
         writeln!(
             script,
+            "puts \"LOOM_MARKER:ACTIVITY:Saving post-route checkpoint\""
+        )?;
+        writeln!(
+            script,
             "write_checkpoint -force {{{}/post_route.dcp}}",
             build_dir_tcl
         )?;
+        writeln!(script, "puts \"LOOM_MARKER:ACTIVITY_DONE\"")?;
         writeln!(script)?;
     }
 
@@ -211,6 +248,30 @@ pub fn generate_tcl(
     )?;
 
     Ok(script)
+}
+
+/// Write report file commands wrapped with activity markers for progress display.
+fn write_report_files_with_activity(
+    script: &mut String,
+    report_cfg: &ReportConfig,
+    build_dir_tcl: &str,
+    stage: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let has_reports =
+        report_cfg.utilization() || report_cfg.timing() || report_cfg.power() || report_cfg.drc();
+    if !has_reports {
+        return Ok(());
+    }
+    let label = stage.replace("_", "-");
+    writeln!(
+        script,
+        "puts \"LOOM_MARKER:ACTIVITY:Writing post-{} reports\"",
+        label
+    )?;
+    write_report_files(script, report_cfg, build_dir_tcl, stage)?;
+    writeln!(script, "puts \"LOOM_MARKER:ACTIVITY_DONE\"")?;
+    writeln!(script)?;
+    Ok(())
 }
 
 /// Write report file commands based on the report configuration.
@@ -247,9 +308,6 @@ fn write_report_files(
             "report_drc -file {{{}/drc_{}.rpt}}",
             build_dir_tcl, stage
         )?;
-    }
-    if report_cfg.utilization() || report_cfg.timing() || report_cfg.power() || report_cfg.drc() {
-        writeln!(script)?;
     }
     Ok(())
 }
@@ -518,6 +576,27 @@ mod tests {
         assert_eq!(
             checkpoint_count, 2,
             "Default config: post_place + post_route checkpoints"
+        );
+
+        // Activity markers for source loading, constraints, reports, and checkpoints
+        assert!(
+            script.contains("LOOM_MARKER:ACTIVITY:Loading source files"),
+            "Should have source file loading activity marker"
+        );
+        assert!(
+            script.contains("LOOM_MARKER:ACTIVITY:Loading constraints"),
+            "Should have constraint loading activity marker"
+        );
+        let activity_count = script.matches("LOOM_MARKER:ACTIVITY:").count();
+        assert!(
+            activity_count >= 6,
+            "Should have activity markers for sources, constraints, reports, and checkpoints (got {})",
+            activity_count
+        );
+        let activity_done_count = script.matches("LOOM_MARKER:ACTIVITY_DONE").count();
+        assert_eq!(
+            activity_count, activity_done_count,
+            "Each ACTIVITY should have a matching ACTIVITY_DONE"
         );
     }
 
