@@ -263,6 +263,7 @@ mod tests {
                     whs: 0.021,
                     ths: 0.0,
                     failing_endpoints: 0,
+                    clocks: Vec::new(),
                 }),
                 utilization: Some(UtilizationMetrics {
                     lut_used: 4230,

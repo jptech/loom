@@ -6,6 +6,7 @@ use crate::manifest::{
     load_component_manifest, load_project_manifest, load_workspace_manifest, ComponentManifest,
     ProjectManifest, WorkspaceManifest,
 };
+use crate::util::clean_path;
 
 pub struct DiscoveredWorkspace {
     pub root: PathBuf,
@@ -28,10 +29,10 @@ pub enum MemberKind {
 
 /// Walk up from `start` to find a directory containing `workspace.toml`.
 pub fn find_workspace_root(start: &Path) -> Result<(PathBuf, WorkspaceManifest), LoomError> {
-    let start = start.canonicalize().map_err(|e| LoomError::Io {
+    let start = clean_path(start.canonicalize().map_err(|e| LoomError::Io {
         path: start.to_owned(),
         source: e,
-    })?;
+    })?);
 
     let mut current = start.as_path();
     loop {
@@ -77,10 +78,10 @@ pub fn discover_members(
                 continue;
             }
 
-            let canonical = path.canonicalize().map_err(|e| LoomError::Io {
+            let canonical = clean_path(path.canonicalize().map_err(|e| LoomError::Io {
                 path: path.clone(),
                 source: e,
-            })?;
+            })?);
             if !seen.insert(canonical.clone()) {
                 continue;
             }

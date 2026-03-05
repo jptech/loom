@@ -1,0 +1,3 @@
+[workspace]
+name = "ucaspian_demo"
+members = ["lib/*", "projects/*"]

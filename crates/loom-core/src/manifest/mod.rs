@@ -9,7 +9,9 @@ pub mod workspace;
 pub use component::{ComponentManifest, DependencySpec, FileSet};
 pub use generator::GeneratorDecl;
 pub use platform::PlatformManifest;
-pub use project::{BuildConfig, ProjectManifest, TargetSpec};
+pub use project::{
+    BuildConfig, CheckpointConfig, ProjectManifest, ReportConfig, TargetSpec, TimingConfig,
+};
 pub use test::{TestCaseResult, TestDecl, TestStatus, TestSuiteDecl, TestSuiteReport};
 pub use workspace::WorkspaceManifest;
 

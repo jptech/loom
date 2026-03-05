@@ -61,6 +61,39 @@ pub struct TimingMetrics {
     pub whs: f64,
     pub ths: f64,
     pub failing_endpoints: u32,
+    /// Per-clock-domain timing data (populated from timing report).
+    #[serde(default)]
+    pub clocks: Vec<ClockTiming>,
+}
+
+/// Per-clock-domain timing information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClockTiming {
+    /// Clock name (e.g., "clk_sys", "sys_clk").
+    pub name: String,
+    /// Constraint period in nanoseconds (from Clock Summary).
+    pub period_ns: Option<f64>,
+    /// Target frequency in MHz (= 1000 / period_ns).
+    pub frequency_mhz: Option<f64>,
+    /// Worst negative slack (setup) in ns.
+    pub wns: f64,
+    /// Total negative slack (setup) in ns.
+    pub tns: f64,
+    /// Worst hold slack in ns.
+    pub whs: f64,
+    /// Total hold slack in ns.
+    pub ths: f64,
+    /// Number of failing timing endpoints.
+    pub failing_endpoints: u32,
+    /// Total timing endpoints.
+    pub total_endpoints: u32,
+    /// Realized Fmax in MHz = 1000 / (period_ns - WNS).
+    /// Positive WNS (slack) → faster than target; negative WNS (violation) → slower.
+    pub achieved_mhz: Option<f64>,
+    /// Whether this clock is auto-generated (MMCM, PLL, clock divider).
+    /// Detected from Vivado's `report_clocks` Attributes column (G = Generated).
+    #[serde(default)]
+    pub is_generated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

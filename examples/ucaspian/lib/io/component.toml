@@ -1,0 +1,14 @@
+[component]
+name = "ucaspian/io"
+version = "1.0.0"
+description = "UART, FIFO, and utility IP for uCaspian host communication"
+
+[filesets.synth]
+files = [
+    "rtl/util.v",
+    "rtl/fifo.sv",
+    "rtl/uart.sv",
+    "rtl/divide_by_n.v",
+    "rtl/pwm.v",
+    "rtl/pulse_stretcher.v",
+]

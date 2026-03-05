@@ -68,14 +68,14 @@ pub fn status(icon: Icon, label: &str, detail: &str) {
     }
 }
 
-/// Print a status line with timing and memory: `  ✓ Label         27s    512 MB`
+/// Print a status line with timing and memory: `  ✓ Label         27s    1.9 GB`
 pub fn status_with_metrics(icon: Icon, label: &str, secs: f64, mb: u64) {
     eprintln!(
-        "  {} {:<14} {:>6}   {:>4} MB",
+        "  {} {:<14} {:>6}   {:>8}",
         icon.render(),
         label,
         format_duration(secs),
-        mb
+        format_memory(mb),
     );
 }
 
@@ -144,6 +144,93 @@ pub fn timing_line(label: &str, wns: f64, whs: f64, is_last: bool) {
     );
 }
 
+// ── Clock table ─────────────────────────────────────────────────────
+
+/// Print a per-clock timing table with target/achieved fmax and slack values.
+///
+/// Clocks are filtered based on the timing config:
+/// - `hide_generated`: skip auto-generated clocks (MMCM/PLL feedback, etc.)
+/// - `exclude_clocks`: skip clocks matching these names
+/// - Otherwise, generated clocks are dimmed to reduce visual noise.
+pub fn clock_table(
+    clocks: &[loom_core::build::report::ClockTiming],
+    is_last: bool,
+    hide_generated: bool,
+    exclude_clocks: &[String],
+) {
+    // Filter clocks based on config
+    let visible: Vec<_> = clocks
+        .iter()
+        .filter(|clk| {
+            if hide_generated && clk.is_generated {
+                return false;
+            }
+            if exclude_clocks.iter().any(|name| name == &clk.name) {
+                return false;
+            }
+            true
+        })
+        .collect();
+
+    if visible.is_empty() {
+        return;
+    }
+    // Header always uses vertical bar — clock data rows follow below
+    eprintln!(
+        "    {} {:<16} {:>10} {:>10}  {:>9}  {:>9}",
+        TREE_VERT,
+        "Clock".dimmed(),
+        "Target".dimmed(),
+        "Achieved".dimmed(),
+        "WNS".dimmed(),
+        "WHS".dimmed()
+    );
+    for (i, clk) in visible.iter().enumerate() {
+        let is_last_clk = i == visible.len() - 1;
+        let clk_prefix = if is_last_clk && is_last {
+            "\u{2514}"
+        } else {
+            "\u{251C}"
+        };
+        let target = clk
+            .frequency_mhz
+            .map(|f| format!("{:.1} MHz", f))
+            .unwrap_or_else(|| "\u{2014}".to_string());
+        let achieved = clk
+            .achieved_mhz
+            .map(|f| format!("{:.1} MHz", f))
+            .unwrap_or_else(|| "\u{2014}".to_string());
+        let wns_icon = if clk.wns >= 0.0 {
+            CHECK.green().to_string()
+        } else {
+            CROSS.red().to_string()
+        };
+        let whs_icon = if clk.whs >= 0.0 {
+            CHECK.green().to_string()
+        } else {
+            CROSS.red().to_string()
+        };
+
+        if clk.is_generated {
+            // Dim generated clocks to reduce visual noise
+            eprintln!(
+                "    {} {}",
+                clk_prefix,
+                format!(
+                    "{:<16} {:>10} {:>10}  {:>+7.3}ns {} {:>+7.3}ns {}",
+                    clk.name, target, achieved, clk.wns, wns_icon, clk.whs, whs_icon
+                )
+                .dimmed()
+            );
+        } else {
+            eprintln!(
+                "    {} {:<16} {:>10} {:>10}  {:>+7.3}ns {} {:>+7.3}ns {}",
+                clk_prefix, clk.name, target, achieved, clk.wns, wns_icon, clk.whs, whs_icon
+            );
+        }
+    }
+}
+
 // ── Spinner ──────────────────────────────────────────────────────────
 
 /// Create a spinner with custom tick chars and elapsed time display.
@@ -174,6 +261,18 @@ pub fn format_duration(secs: f64) -> String {
         format!("{:.1}s", secs)
     } else {
         format!("{}s", s)
+    }
+}
+
+// ── Memory formatting ────────────────────────────────────────────────
+
+/// Format megabytes as a compact memory string with appropriate units.
+/// `512 MB`, `2.1 GB`, `16.0 GB`
+pub fn format_memory(mb: u64) -> String {
+    if mb >= 1024 {
+        format!("{:.1} GB", mb as f64 / 1024.0)
+    } else {
+        format!("{} MB", mb)
     }
 }
 
@@ -336,5 +435,16 @@ mod tests {
         assert!(!Icon::Cross.render().is_empty());
         assert!(!Icon::Dot.render().is_empty());
         assert!(!Icon::Warning.render().is_empty());
+    }
+
+    #[test]
+    fn test_format_memory() {
+        assert_eq!(format_memory(0), "0 MB");
+        assert_eq!(format_memory(512), "512 MB");
+        assert_eq!(format_memory(1023), "1023 MB");
+        assert_eq!(format_memory(1024), "1.0 GB");
+        assert_eq!(format_memory(2113), "2.1 GB");
+        assert_eq!(format_memory(10240), "10.0 GB");
+        assert_eq!(format_memory(32768), "32.0 GB");
     }
 }

@@ -1,0 +1,19 @@
+[component]
+name = "ucaspian/core"
+version = "1.0.0"
+description = "uCaspian neuromorphic SNN processor core (ORNL, MIT license)"
+
+[filesets.synth]
+files = [
+    "rtl/find_set_bit.sv",
+    "rtl/dp_ram.sv",
+    "rtl/fire_dispatch.sv",
+    "rtl/dendrite_mux.sv",
+    "rtl/dendrite.sv",
+    "rtl/synapse.sv",
+    "rtl/axon.sv",
+    "rtl/neuron.sv",
+    "rtl/packet_interface.sv",
+    "rtl/ucaspian_core.sv",
+    "rtl/ucaspian.sv",
+]

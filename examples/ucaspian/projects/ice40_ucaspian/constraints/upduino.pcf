@@ -1,0 +1,17 @@
+# UPduino v2/v3 — iCE40 UP5K SG48
+# Pin assignments for uCaspian UART interface
+#
+# Originally from uCaspian (https://github.com/ornl/ucaspian)
+# Copyright (c) 2025 UT-BATTELLE, LLC — MIT License
+
+# RGB LEDs (active low, active-low, active-low current source)
+set_io -nowarn led_r	41
+set_io -nowarn led_g	39
+set_io -nowarn led_b	40
+
+# FTDI USB-UART bridge
+set_io -nowarn serial_txd 14
+set_io -nowarn serial_rxd 15
+
+# SPI flash chip select (active low, active-low drive high to disable)
+set_io -nowarn spi_cs 16
