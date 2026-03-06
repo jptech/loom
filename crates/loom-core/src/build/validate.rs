@@ -283,6 +283,7 @@ mod tests {
                 source_component: "test".to_string(),
                 language: FileLanguage::SystemVerilog,
             }],
+            sim_files: vec![],
             constraint_files: vec![],
             defines: vec![],
         };

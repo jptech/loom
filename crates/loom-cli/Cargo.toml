@@ -21,6 +21,9 @@ loom-questa = { path = "../loom-questa" }
 loom-vcs = { path = "../loom-vcs" }
 loom-xcelium = { path = "../loom-xcelium" }
 clap.workspace = true
+clap_complete.workspace = true
+notify.workspace = true
+notify-debouncer-mini.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
 toml.workspace = true

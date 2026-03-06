@@ -1,0 +1,15 @@
+[project]
+name = "sim_top"
+top_module = "top"
+description = "Integration top for simulation demo"
+
+[target]
+part = "xc7a35tcpg236-1"
+backend = "xsim"
+
+[filesets.synth]
+files = ["src/top.sv"]
+
+[dependencies]
+fifo = ">=1.0.0"
+alu = ">=1.0.0"

@@ -25,6 +25,14 @@ pub struct TestDecl {
     /// Additional dependencies for this test only.
     #[serde(default)]
     pub dependencies: HashMap<String, DependencySpec>,
+    /// Test runner: None or "hdl" (default), "cocotb", "verilator" (future).
+    /// When absent, the test uses a traditional HDL testbench where `top` is the
+    /// testbench module. With "cocotb", `top` is the DUT module and `sources`
+    /// lists Python test scripts.
+    pub runner: Option<String>,
+    /// Source files for non-HDL runners (e.g., Python scripts for cocotb).
+    #[serde(default)]
+    pub sources: Vec<String>,
 }
 
 /// Simulator requirements declared by a test.

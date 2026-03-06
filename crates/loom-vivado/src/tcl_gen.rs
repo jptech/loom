@@ -406,6 +406,7 @@ mod tests {
                 source_component: "org/axi_common".to_string(),
                 language: FileLanguage::SystemVerilog,
             }],
+            sim_files: vec![],
             constraint_files: vec![],
             defines: vec![],
         };
@@ -420,6 +421,7 @@ mod tests {
     fn test_tcl_component_scoped_constraint() {
         let filesets = AssembledFilesets {
             synth_files: vec![],
+            sim_files: vec![],
             constraint_files: vec![AssembledConstraint {
                 path: PathBuf::from("/workspace/lib/fifo/cdc.xdc"),
                 source_component: "org/fifo".to_string(),
@@ -440,6 +442,7 @@ mod tests {
     fn test_tcl_global_constraint() {
         let filesets = AssembledFilesets {
             synth_files: vec![],
+            sim_files: vec![],
             constraint_files: vec![AssembledConstraint {
                 path: PathBuf::from("/workspace/constraints/timing.xdc"),
                 source_component: "project".to_string(),

@@ -1,5 +1,6 @@
 pub mod build;
 pub mod clean;
+pub mod completions;
 pub mod deps;
 pub mod env;
 pub mod ip;
@@ -12,3 +13,4 @@ pub mod registry;
 pub mod report;
 pub mod sim;
 pub mod status;
+pub mod watch;

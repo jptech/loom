@@ -1,10 +1,10 @@
 use std::path::PathBuf;
-use std::process::Command;
 
 use loom_core::assemble::fileset::{AssembledFilesets, FileLanguage};
 use loom_core::build::context::BuildContext;
 use loom_core::error::LoomError;
 use loom_core::plugin::simulator::{CompileResult, SimOptions};
+use loom_core::util::{tool_arg, tool_command};
 
 /// Compile sources using xvlog (Verilog/SV) and xvhdl (VHDL).
 pub fn compile_xsim(
@@ -22,10 +22,11 @@ pub fn compile_xsim(
     let mut all_errors = Vec::new();
     let mut all_warnings = Vec::new();
 
-    // Collect files by language
-    let sv_files: Vec<_> = filesets
-        .synth_files
-        .iter()
+    // Collect files by language (synth + sim files for simulation)
+    let all_files = filesets.synth_files.iter().chain(filesets.sim_files.iter());
+
+    let sv_files: Vec<_> = all_files
+        .clone()
         .filter(|f| {
             matches!(
                 f.language,
@@ -34,19 +35,18 @@ pub fn compile_xsim(
         })
         .collect();
 
-    let vhdl_files: Vec<_> = filesets
-        .synth_files
-        .iter()
+    let vhdl_files: Vec<_> = all_files
         .filter(|f| matches!(f.language, FileLanguage::Vhdl))
         .collect();
 
     // Compile SystemVerilog/Verilog files with xvlog
     if !sv_files.is_empty() {
-        let mut cmd = Command::new("xvlog");
+        let mut cmd = tool_command("xvlog");
         cmd.arg("--sv").current_dir(&sim_dir);
 
         for define in &options.defines {
-            cmd.arg("-d").arg(define);
+            cmd.arg("-d");
+            tool_arg(&mut cmd, define);
         }
 
         for file in &sv_files {
@@ -82,7 +82,7 @@ pub fn compile_xsim(
 
     // Compile VHDL files with xvhdl
     if !vhdl_files.is_empty() {
-        let mut cmd = Command::new("xvhdl");
+        let mut cmd = tool_command("xvhdl");
         cmd.current_dir(&sim_dir);
 
         for file in &vhdl_files {

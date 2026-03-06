@@ -1,7 +1,6 @@
 pub mod env_check;
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use loom_core::assemble::fileset::{AssembledFilesets, FileLanguage};
 use loom_core::build::context::BuildContext;
@@ -11,6 +10,7 @@ use loom_core::plugin::simulator::{
     CompileResult, CoverageReport, ElaborateResult, SimOptions, SimReport, SimResult,
     SimulatorCapabilities, SimulatorPlugin,
 };
+use loom_core::util::{tool_arg, tool_command};
 
 pub struct IcarusBackend;
 
@@ -61,7 +61,7 @@ impl SimulatorPlugin for IcarusBackend {
         let log_path = sim_dir.join("compile.log");
         let output_vvp = sim_dir.join("sim.vvp");
 
-        let mut cmd = Command::new("iverilog");
+        let mut cmd = tool_command("iverilog");
         cmd.arg("-o")
             .arg(output_vvp.display().to_string())
             .arg("-g2012") // Enable SystemVerilog (basic support)
@@ -70,11 +70,11 @@ impl SimulatorPlugin for IcarusBackend {
             .current_dir(&sim_dir);
 
         for define in &options.defines {
-            cmd.arg(format!("-D{}", define));
+            tool_arg(&mut cmd, &format!("-D{}", define));
         }
 
-        // Add source files (Verilog/SV only)
-        for file in &filesets.synth_files {
+        // Add source files (Verilog/SV only) — include sim files for testbenches
+        for file in filesets.synth_files.iter().chain(filesets.sim_files.iter()) {
             if matches!(
                 file.language,
                 FileLanguage::SystemVerilog | FileLanguage::Verilog
@@ -137,11 +137,11 @@ impl SimulatorPlugin for IcarusBackend {
 
         let start = std::time::Instant::now();
 
-        let mut cmd = Command::new("vvp");
+        let mut cmd = tool_command("vvp");
         cmd.arg(vvp_file.display().to_string()).current_dir(sim_dir);
 
         for plusarg in &options.plusargs {
-            cmd.arg(format!("+{}", plusarg));
+            tool_arg(&mut cmd, &format!("+{}", plusarg));
         }
 
         let output = cmd

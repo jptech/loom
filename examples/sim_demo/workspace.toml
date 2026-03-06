@@ -1,0 +1,3 @@
+[workspace]
+name = "sim_demo"
+members = ["lib/*", "projects/*"]

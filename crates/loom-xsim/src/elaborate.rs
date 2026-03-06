@@ -1,8 +1,7 @@
-use std::process::Command;
-
 use loom_core::build::context::BuildContext;
 use loom_core::error::LoomError;
 use loom_core::plugin::simulator::{CompileResult, ElaborateResult, SimOptions};
+use loom_core::util::tool_command;
 
 /// Elaborate using xelab.
 pub fn elaborate_xsim(
@@ -15,7 +14,7 @@ pub fn elaborate_xsim(
     let log_path = sim_dir.join("elaborate.log");
     let snapshot = format!("{}_snap", top_module);
 
-    let mut cmd = Command::new("xelab");
+    let mut cmd = tool_command("xelab");
     cmd.arg(top_module)
         .arg("-s")
         .arg(&snapshot)

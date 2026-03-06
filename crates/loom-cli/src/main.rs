@@ -80,6 +80,12 @@ pub enum Commands {
 
     /// Show project status dashboard
     Status(commands::status::StatusArgs),
+
+    /// Generate shell completions
+    Completions(commands::completions::CompletionsArgs),
+
+    /// Watch for file changes and rebuild
+    Watch(commands::watch::WatchArgs),
 }
 
 pub struct GlobalContext {
@@ -131,6 +137,8 @@ fn main() {
         Commands::Report(args) => commands::report::run(args, &ctx),
         Commands::Sim(args) => commands::sim::run(args, &ctx),
         Commands::Status(args) => commands::status::run(args, &ctx),
+        Commands::Completions(args) => commands::completions::run(args, &ctx),
+        Commands::Watch(args) => commands::watch::run(args, &ctx),
     };
 
     match result {

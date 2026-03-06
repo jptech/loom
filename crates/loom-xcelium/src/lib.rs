@@ -1,7 +1,6 @@
 pub mod env_check;
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use loom_core::assemble::fileset::{AssembledFilesets, FileLanguage};
 use loom_core::build::context::BuildContext;
@@ -11,6 +10,7 @@ use loom_core::plugin::simulator::{
     CompileResult, CoverageReport, ElaborateResult, SimOptions, SimReport, SimResult,
     SimulatorCapabilities, SimulatorPlugin,
 };
+use loom_core::util::{tool_arg, tool_command};
 
 pub struct XceliumBackend;
 
@@ -62,10 +62,10 @@ impl SimulatorPlugin for XceliumBackend {
 
         // Xcelium uses xrun for single-step compile+elaborate+simulate,
         // but we split into phases for the trait interface.
-        // Compile with xmvlog/xmvhdl
-        let sv_files: Vec<String> = filesets
-            .synth_files
-            .iter()
+        // Compile with xmvlog/xmvhdl (synth + sim files)
+        let all_files = filesets.synth_files.iter().chain(filesets.sim_files.iter());
+        let sv_files: Vec<String> = all_files
+            .clone()
             .filter(|f| {
                 matches!(
                     f.language,
@@ -76,11 +76,12 @@ impl SimulatorPlugin for XceliumBackend {
             .collect();
 
         if !sv_files.is_empty() {
-            let mut cmd = Command::new("xmvlog");
+            let mut cmd = tool_command("xmvlog");
             cmd.arg("-sv").current_dir(&sim_dir);
 
             for define in &options.defines {
-                cmd.arg(format!("-define {}", define));
+                cmd.arg("-define");
+                tool_arg(&mut cmd, define);
             }
 
             for f in &sv_files {
@@ -110,15 +111,13 @@ impl SimulatorPlugin for XceliumBackend {
         }
 
         // Compile VHDL
-        let vhdl_files: Vec<String> = filesets
-            .synth_files
-            .iter()
+        let vhdl_files: Vec<String> = all_files
             .filter(|f| matches!(f.language, FileLanguage::Vhdl))
             .map(|f| loom_core::util::to_tool_path(&f.path))
             .collect();
 
         if !vhdl_files.is_empty() {
-            let mut cmd = Command::new("xmvhdl");
+            let mut cmd = tool_command("xmvhdl");
             cmd.arg("-v200x").current_dir(&sim_dir);
 
             for f in &vhdl_files {
@@ -166,7 +165,7 @@ impl SimulatorPlugin for XceliumBackend {
         let sim_dir = &compile_result.work_dir;
         let log_path = sim_dir.join("elaborate.log");
 
-        let mut cmd = Command::new("xmelab");
+        let mut cmd = tool_command("xmelab");
         cmd.arg(top_module).current_dir(sim_dir);
 
         if options.enable_coverage {
@@ -204,7 +203,7 @@ impl SimulatorPlugin for XceliumBackend {
 
         let start = std::time::Instant::now();
 
-        let mut cmd = Command::new("xmsim");
+        let mut cmd = tool_command("xmsim");
         cmd.arg(&elaborate_result.snapshot).current_dir(sim_dir);
 
         if options.enable_coverage {
@@ -212,7 +211,7 @@ impl SimulatorPlugin for XceliumBackend {
         }
 
         for plusarg in &options.plusargs {
-            cmd.arg(format!("+{}", plusarg));
+            tool_arg(&mut cmd, &format!("+{}", plusarg));
         }
 
         if let Some(seed) = options.seed {
@@ -262,7 +261,7 @@ impl SimulatorPlugin for XceliumBackend {
         output: &Path,
     ) -> Result<CoverageReport, LoomError> {
         // imc -exec merge.tcl
-        let mut cmd = Command::new("imc");
+        let mut cmd = tool_command("imc");
         cmd.arg("-batch").arg("-exec").arg(format!(
             "merge {} -out {}",
             coverage_dbs

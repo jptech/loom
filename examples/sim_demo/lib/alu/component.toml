@@ -1,0 +1,37 @@
+[component]
+name = "demo/alu"
+version = "1.0.0"
+description = "Simple 8-bit ALU with arithmetic and logic operations"
+
+[filesets.synth]
+files = ["rtl/alu.sv"]
+
+[filesets.sim]
+files = ["tb/tb_alu_basic.sv", "tb/tb_alu_random.sv"]
+
+# --- Tests ---
+
+[[tests]]
+name = "alu_basic"
+top = "tb_alu_basic"
+description = "Basic operation verification"
+tags = ["smoke"]
+timeout_seconds = 30
+
+[[tests]]
+name = "alu_random"
+top = "tb_alu_random"
+description = "Randomized concurrent checker with fork/join"
+tags = ["regression"]
+timeout_seconds = 60
+
+[tests.requires]
+fork_join = true
+
+[[tests]]
+name = "alu_cocotb"
+top = "alu"
+description = "Python-based ALU test via cocotb"
+runner = "cocotb"
+sources = ["tb/test_alu.py"]
+tags = ["smoke"]

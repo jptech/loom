@@ -9,6 +9,8 @@ use super::ordering::sort_constraints;
 #[derive(Debug, Clone)]
 pub struct AssembledFilesets {
     pub synth_files: Vec<AssembledFile>,
+    /// Simulation-only files (testbenches) from `[filesets.sim]` sections.
+    pub sim_files: Vec<AssembledFile>,
     pub constraint_files: Vec<AssembledConstraint>,
     pub defines: Vec<String>,
 }
@@ -55,6 +57,7 @@ pub enum ConstraintScope {
 /// Assemble all filesets from a resolved project.
 pub fn assemble_filesets(resolved: &ResolvedProject) -> Result<AssembledFilesets, LoomError> {
     let mut synth_files: Vec<AssembledFile> = Vec::new();
+    let mut sim_files: Vec<AssembledFile> = Vec::new();
     let mut constraint_files: Vec<AssembledConstraint> = Vec::new();
     let mut defines: Vec<String> = Vec::new();
 
@@ -99,6 +102,21 @@ pub fn assemble_filesets(resolved: &ResolvedProject) -> Result<AssembledFilesets
 
             defines.extend(synth_fs.defines.iter().cloned());
         }
+
+        // Collect simulation-only files (testbenches)
+        if let Some(sim_fs) = component.manifest.filesets.get("sim") {
+            for rel_path in &sim_fs.files {
+                let abs_path = comp_dir.join(rel_path);
+                let language = FileLanguage::from_extension(
+                    abs_path.extension().and_then(|e| e.to_str()).unwrap_or(""),
+                );
+                sim_files.push(AssembledFile {
+                    path: abs_path,
+                    source_component: comp_name.clone(),
+                    language,
+                });
+            }
+        }
     }
 
     // 2. Add project's own files
@@ -129,10 +147,26 @@ pub fn assemble_filesets(resolved: &ResolvedProject) -> Result<AssembledFilesets
         defines.extend(synth_fs.defines.iter().cloned());
     }
 
+    // Collect project sim files
+    if let Some(sim_fs) = resolved.project.filesets.get("sim") {
+        for rel_path in &sim_fs.files {
+            let abs_path = proj_dir.join(rel_path);
+            let language = FileLanguage::from_extension(
+                abs_path.extension().and_then(|e| e.to_str()).unwrap_or(""),
+            );
+            sim_files.push(AssembledFile {
+                path: abs_path,
+                source_component: proj_name.clone(),
+                language,
+            });
+        }
+    }
+
     constraint_files = sort_constraints(constraint_files);
 
     Ok(AssembledFilesets {
         synth_files,
+        sim_files,
         constraint_files,
         defines,
     })
@@ -206,6 +240,48 @@ mod tests {
         );
         assert_eq!(FileLanguage::from_extension("vhd"), FileLanguage::Vhdl);
         assert_eq!(FileLanguage::from_extension("v"), FileLanguage::Verilog);
+    }
+
+    #[test]
+    fn test_sim_files_collected() {
+        let resolved = resolve_simple_project();
+        let filesets = assemble_filesets(&resolved).unwrap();
+
+        // The axi_common component has a [filesets.sim] section
+        assert!(
+            !filesets.sim_files.is_empty(),
+            "sim_files should not be empty when [filesets.sim] is present"
+        );
+
+        // Verify the sim file came from the right component
+        let sim_sources: Vec<&str> = filesets
+            .sim_files
+            .iter()
+            .map(|f| f.source_component.as_str())
+            .collect();
+        assert!(
+            sim_sources.contains(&"testorg/axi_common"),
+            "sim_files should include files from testorg/axi_common"
+        );
+
+        // Verify the file path ends with the expected testbench
+        let has_tb = filesets
+            .sim_files
+            .iter()
+            .any(|f| f.path.ends_with("tb/tb_axi_common.sv"));
+        assert!(has_tb, "sim_files should contain tb_axi_common.sv");
+
+        // Verify language detection for sim files
+        let tb_file = filesets
+            .sim_files
+            .iter()
+            .find(|f| f.path.ends_with("tb_axi_common.sv"))
+            .unwrap();
+        assert_eq!(
+            tb_file.language,
+            FileLanguage::SystemVerilog,
+            "tb_axi_common.sv should be detected as SystemVerilog"
+        );
     }
 
     #[test]

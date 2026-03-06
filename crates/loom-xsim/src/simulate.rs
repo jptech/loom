@@ -1,8 +1,7 @@
-use std::process::Command;
-
 use loom_core::build::context::BuildContext;
 use loom_core::error::LoomError;
 use loom_core::plugin::simulator::{ElaborateResult, SimOptions, SimResult};
+use loom_core::util::{tool_arg, tool_command};
 
 /// Run simulation using xsim.
 pub fn simulate_xsim(
@@ -18,13 +17,14 @@ pub fn simulate_xsim(
 
     let start = std::time::Instant::now();
 
-    let mut cmd = Command::new("xsim");
+    let mut cmd = tool_command("xsim");
     cmd.arg(&elaborate_result.snapshot)
         .arg("--runall")
         .current_dir(sim_dir);
 
     for plusarg in &options.plusargs {
-        cmd.arg(format!("--testplusarg {}", plusarg));
+        cmd.arg("--testplusarg");
+        tool_arg(&mut cmd, plusarg);
     }
 
     let output = cmd.output().map_err(|e| LoomError::ToolNotFound {
