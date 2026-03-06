@@ -1,11 +1,11 @@
 use std::path::PathBuf;
-use std::process::Command;
 
 use loom_core::assemble::fileset::{AssembledFilesets, FileLanguage};
 use loom_core::build::context::BuildContext;
 use loom_core::error::LoomError;
 use loom_core::plugin::backend::BuildResult;
 use loom_core::resolve::resolver::ResolvedProject;
+use loom_core::util::tool_command;
 
 use crate::YosysArchitecture;
 
@@ -77,7 +77,7 @@ pub fn write_yosys_script(script: &str, context: &BuildContext) -> Result<PathBu
 pub fn run_yosys(script: &PathBuf, context: &BuildContext) -> Result<BuildResult, LoomError> {
     let log_path = context.build_dir.join("yosys.log");
 
-    let output = Command::new("yosys")
+    let output = tool_command("yosys")
         .arg("-s")
         .arg(script)
         .current_dir(&context.build_dir)
@@ -150,6 +150,7 @@ backend = "yosys"
                 source_component: "blinky".to_string(),
                 language: FileLanguage::Verilog,
             }],
+            sim_files: vec![],
             constraint_files: vec![],
             defines: vec![],
         };

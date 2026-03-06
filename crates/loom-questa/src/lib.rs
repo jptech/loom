@@ -1,7 +1,6 @@
 pub mod env_check;
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use loom_core::assemble::fileset::{AssembledFilesets, FileLanguage};
 use loom_core::build::context::BuildContext;
@@ -11,6 +10,7 @@ use loom_core::plugin::simulator::{
     CompileResult, CoverageReport, ElaborateResult, SimOptions, SimReport, SimResult,
     SimulatorCapabilities, SimulatorPlugin,
 };
+use loom_core::util::{tool_arg, tool_command};
 
 pub struct QuestaBackend;
 
@@ -61,7 +61,7 @@ impl SimulatorPlugin for QuestaBackend {
         let log_path = sim_dir.join("compile.log");
 
         // Create work library
-        let vlib_output = Command::new("vlib")
+        let vlib_output = tool_command("vlib")
             .arg("work")
             .current_dir(&sim_dir)
             .output()
@@ -80,10 +80,10 @@ impl SimulatorPlugin for QuestaBackend {
             });
         }
 
-        // Compile SystemVerilog/Verilog files with vlog
-        let sv_files: Vec<String> = filesets
-            .synth_files
-            .iter()
+        // Compile SystemVerilog/Verilog files with vlog (synth + sim files)
+        let all_files = filesets.synth_files.iter().chain(filesets.sim_files.iter());
+        let sv_files: Vec<String> = all_files
+            .clone()
             .filter(|f| {
                 matches!(
                     f.language,
@@ -94,14 +94,14 @@ impl SimulatorPlugin for QuestaBackend {
             .collect();
 
         if !sv_files.is_empty() {
-            let mut cmd = Command::new("vlog");
+            let mut cmd = tool_command("vlog");
             cmd.arg("-sv")
                 .arg("-work")
                 .arg("work")
                 .current_dir(&sim_dir);
 
             for define in &options.defines {
-                cmd.arg(format!("+define+{}", define));
+                tool_arg(&mut cmd, &format!("+define+{}", define));
             }
 
             for f in &sv_files {
@@ -131,15 +131,13 @@ impl SimulatorPlugin for QuestaBackend {
         }
 
         // Compile VHDL files with vcom
-        let vhdl_files: Vec<String> = filesets
-            .synth_files
-            .iter()
+        let vhdl_files: Vec<String> = all_files
             .filter(|f| matches!(f.language, FileLanguage::Vhdl))
             .map(|f| loom_core::util::to_tool_path(&f.path))
             .collect();
 
         if !vhdl_files.is_empty() {
-            let mut cmd = Command::new("vcom");
+            let mut cmd = tool_command("vcom");
             cmd.arg("-2008")
                 .arg("-work")
                 .arg("work")
@@ -190,7 +188,7 @@ impl SimulatorPlugin for QuestaBackend {
         let sim_dir = &compile_result.work_dir;
         let log_path = sim_dir.join("elaborate.log");
 
-        let mut cmd = Command::new("vopt");
+        let mut cmd = tool_command("vopt");
         cmd.arg("+acc")
             .arg("-o")
             .arg(format!("{}_opt", top_module))
@@ -234,7 +232,7 @@ impl SimulatorPlugin for QuestaBackend {
 
         let start = std::time::Instant::now();
 
-        let mut cmd = Command::new("vsim");
+        let mut cmd = tool_command("vsim");
         cmd.arg("-c")
             .arg("-do")
             .arg("run -all; quit -f")
@@ -249,7 +247,7 @@ impl SimulatorPlugin for QuestaBackend {
         }
 
         for plusarg in &options.plusargs {
-            cmd.arg(format!("+{}", plusarg));
+            tool_arg(&mut cmd, &format!("+{}", plusarg));
         }
 
         if let Some(seed) = options.seed {
@@ -299,7 +297,7 @@ impl SimulatorPlugin for QuestaBackend {
         output: &Path,
     ) -> Result<CoverageReport, LoomError> {
         // vcover merge -out merged.ucdb db1.ucdb db2.ucdb
-        let mut cmd = Command::new("vcover");
+        let mut cmd = tool_command("vcover");
         cmd.arg("merge")
             .arg("-out")
             .arg(output.display().to_string());

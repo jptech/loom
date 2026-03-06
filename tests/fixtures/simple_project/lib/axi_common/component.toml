@@ -4,3 +4,6 @@ version = "1.0.0"
 
 [filesets.synth]
 files = ["rtl/axi_pkg.sv"]
+
+[filesets.sim]
+files = ["tb/tb_axi_common.sv"]

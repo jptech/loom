@@ -1,4 +1,66 @@
 use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// Add an argument to a tool command, handling Windows `cmd.exe` quoting.
+///
+/// When commands run through `cmd /C` (via [`tool_command`]), the batch-file
+/// processor treats `=`, `;`, and `,` as argument delimiters.  This function
+/// wraps arguments containing those characters in double quotes using
+/// [`raw_arg`][std::os::windows::process::CommandExt::raw_arg] so they are
+/// preserved as single tokens.
+///
+/// On non-Windows platforms this is equivalent to [`Command::arg`].
+///
+/// # When to use
+///
+/// Use `tool_arg` instead of `cmd.arg()` for any user/manifest-supplied value
+/// that might contain `=` — primarily **defines** (`SIM=1`) and **plusargs**
+/// (`seed=42`).  Fixed tool flags (`--sv`, `-s`, etc.) never contain `=` and
+/// can use the regular `cmd.arg()`.
+#[cfg(target_os = "windows")]
+pub fn tool_arg(cmd: &mut Command, arg: &str) {
+    use std::os::windows::process::CommandExt;
+    if arg.contains('=') || arg.contains(';') || arg.contains(',') {
+        cmd.raw_arg(format!("\"{}\"", arg));
+    } else {
+        cmd.arg(arg);
+    }
+}
+
+/// See the Windows-specific doc above — on other platforms this is a plain `arg()`.
+#[cfg(not(target_os = "windows"))]
+pub fn tool_arg(cmd: &mut Command, arg: &str) {
+    cmd.arg(arg);
+}
+
+/// Create a [`Command`] for an external tool, handling `.bat`/`.cmd` wrappers on Windows.
+///
+/// On Windows, [`Command::new("xvlog")`] uses `CreateProcess` which only resolves
+/// `.exe` and `.com` extensions — not `.bat` or `.cmd`.  Many EDA tools (Vivado,
+/// Quartus, etc.) ship as `.bat` wrappers, so bare names like `"xvlog"` fail even
+/// when the tool is on `PATH`.
+///
+/// This function routes through `cmd.exe /C` on Windows so that the shell's own
+/// `PATH` + `PATHEXT` resolution finds `.bat` and `.cmd` files.  On Unix it
+/// delegates directly to [`Command::new`].
+///
+/// # Examples
+///
+/// ```ignore
+/// use loom_core::util::tool_command;
+/// let mut cmd = tool_command("xvlog");
+/// cmd.arg("--sv").arg("top.sv");
+/// let output = cmd.output()?;
+/// ```
+pub fn tool_command(tool: &str) -> Command {
+    if cfg!(target_os = "windows") {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", tool]);
+        cmd
+    } else {
+        Command::new(tool)
+    }
+}
 
 /// Strip the Windows extended-length path prefix (`\\?\`) from a `PathBuf`.
 ///

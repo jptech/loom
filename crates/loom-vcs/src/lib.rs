@@ -11,6 +11,7 @@ use loom_core::plugin::simulator::{
     CompileResult, CoverageReport, ElaborateResult, SimOptions, SimReport, SimResult,
     SimulatorCapabilities, SimulatorPlugin,
 };
+use loom_core::util::{tool_arg, tool_command};
 
 pub struct VcsBackend;
 
@@ -60,7 +61,7 @@ impl SimulatorPlugin for VcsBackend {
 
         let log_path = sim_dir.join("compile.log");
 
-        let mut cmd = Command::new("vcs");
+        let mut cmd = tool_command("vcs");
         cmd.arg("-sverilog")
             .arg("-full64")
             .arg("-timescale=1ns/1ps")
@@ -75,11 +76,11 @@ impl SimulatorPlugin for VcsBackend {
         }
 
         for define in &options.defines {
-            cmd.arg(format!("+define+{}", define));
+            tool_arg(&mut cmd, &format!("+define+{}", define));
         }
 
-        // Add source files
-        for file in &filesets.synth_files {
+        // Add source files (synth + sim files for testbenches)
+        for file in filesets.synth_files.iter().chain(filesets.sim_files.iter()) {
             match file.language {
                 FileLanguage::SystemVerilog | FileLanguage::Verilog => {
                     cmd.arg(loom_core::util::to_tool_path(&file.path));
@@ -204,7 +205,7 @@ impl SimulatorPlugin for VcsBackend {
         output: &Path,
     ) -> Result<CoverageReport, LoomError> {
         // urg -dir db1.vdb db2.vdb -dbname merged
-        let mut cmd = Command::new("urg");
+        let mut cmd = tool_command("urg");
         for db in coverage_dbs {
             cmd.arg("-dir").arg(db.display().to_string());
         }

@@ -158,6 +158,7 @@ backend = "quartus"
                 source_component: "my_design".to_string(),
                 language: FileLanguage::SystemVerilog,
             }],
+            sim_files: vec![],
             constraint_files: vec![],
             defines: vec!["DEBUG=1".to_string()],
         };

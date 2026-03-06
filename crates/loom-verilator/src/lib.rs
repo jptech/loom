@@ -11,6 +11,7 @@ use loom_core::plugin::simulator::{
     CompileResult, CoverageReport, ElaborateResult, SimOptions, SimReport, SimResult,
     SimulatorCapabilities, SimulatorPlugin,
 };
+use loom_core::util::{tool_arg, tool_command};
 
 pub struct VerilatorBackend;
 
@@ -60,7 +61,7 @@ impl SimulatorPlugin for VerilatorBackend {
 
         let log_path = sim_dir.join("compile.log");
 
-        let mut cmd = Command::new("verilator");
+        let mut cmd = tool_command("verilator");
         cmd.arg("--cc")
             .arg("--exe")
             .arg("--build")
@@ -75,11 +76,11 @@ impl SimulatorPlugin for VerilatorBackend {
         }
 
         for define in &options.defines {
-            cmd.arg(format!("+define+{}", define));
+            tool_arg(&mut cmd, &format!("+define+{}", define));
         }
 
-        // Add source files (Verilog/SV only, no VHDL)
-        for file in &filesets.synth_files {
+        // Add source files (Verilog/SV only, no VHDL) — include sim files for testbenches
+        for file in filesets.synth_files.iter().chain(filesets.sim_files.iter()) {
             if matches!(
                 file.language,
                 FileLanguage::SystemVerilog | FileLanguage::Verilog
@@ -200,7 +201,7 @@ impl SimulatorPlugin for VerilatorBackend {
         output: &Path,
     ) -> Result<CoverageReport, LoomError> {
         // verilator_coverage --write merged.dat file1.dat file2.dat
-        let mut cmd = Command::new("verilator_coverage");
+        let mut cmd = tool_command("verilator_coverage");
         cmd.arg("--write").arg(output.display().to_string());
         for db in coverage_dbs {
             cmd.arg(db.display().to_string());

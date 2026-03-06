@@ -1,8 +1,7 @@
-use std::process::Command;
-
 use loom_core::build::context::BuildContext;
 use loom_core::error::LoomError;
 use loom_core::plugin::backend::BuildResult;
+use loom_core::util::tool_command;
 
 use crate::YosysArchitecture;
 
@@ -28,7 +27,7 @@ pub fn run_pack(
         ),
     };
 
-    let mut cmd = Command::new(arch.pack_binary());
+    let mut cmd = tool_command(arch.pack_binary());
     cmd.arg(input_file.display().to_string())
         .arg(output_file.display().to_string())
         .current_dir(&context.build_dir);

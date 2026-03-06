@@ -1,0 +1,42 @@
+[component]
+name = "demo/fifo"
+version = "1.0.0"
+description = "Synchronous FIFO with configurable depth and width"
+
+[filesets.synth]
+files = ["rtl/sync_fifo.sv"]
+
+[filesets.sim]
+files = ["tb/tb_fifo_basic.sv", "tb/tb_fifo_stress.sv"]
+
+# --- Tests ---
+
+[[tests]]
+name = "fifo_basic"
+top = "tb_fifo_basic"
+description = "Basic push/pop verification"
+tags = ["smoke"]
+timeout_seconds = 60
+
+[tests.sim_options]
+defines = ["SIM=1"]
+
+[[tests]]
+name = "fifo_stress"
+top = "tb_fifo_stress"
+description = "Fill/drain and boundary condition testing"
+tags = ["regression"]
+timeout_seconds = 120
+
+[tests.requires]
+systemverilog_full = true
+
+# --- Test Suites ---
+
+[test_suites.smoke]
+description = "Quick sanity checks"
+tags = ["smoke"]
+
+[test_suites.regression]
+description = "Full regression suite"
+tags = ["smoke", "regression"]

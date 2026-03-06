@@ -39,6 +39,7 @@ crates/
 │   ├── generate/   #   Code gen: dag.rs, node.rs, cache.rs, execute.rs, plugins/
 │   ├── build/      #   Pipeline: pipeline.rs, validate.rs, context.rs,
 │   │               #             checkpoint.rs, hooks.rs, report.rs, progress.rs
+│   ├── sim/        #   Sim runner: compat.rs, discovery.rs, runner.rs
 │   ├── plugin/     #   Trait definitions: backend.rs, simulator.rs, generator.rs,
 │   │               #                      reporter.rs, mod.rs
 │   ├── util.rs
@@ -72,7 +73,7 @@ Manifests (`component.toml`, `project.toml`, `workspace.toml`) → dependency re
 
 ### Phase Boundaries
 
-All 7 phases are implemented. The `-j` flag is parsed but ignored (parallelism not yet wired up).
+All 7 phases are implemented. The `-j` flag enables parallel test execution in `loom sim` (using `std::thread::scope` with a counting semaphore). For `loom build`, `-j` is parsed but not yet wired up.
 
 ### Manifests
 
