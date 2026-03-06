@@ -277,6 +277,8 @@ version = "2023.2"
 | `loom ip upgrade` | Check for IP version upgrades |
 | `loom status` | Show project dashboard (deps, files, last build summary) |
 | `loom report` | Show the last build report |
+| `loom watch` | Watch for file changes and rebuild/resim automatically |
+| `loom completions` | Generate shell completions (bash, zsh, fish, powershell) |
 | `loom lsp` | Export LSP configuration for editor integration |
 | `loom migrate xci-to-toml` | Convert Vivado `.xci` files to TOML generator config |
 | `loom registry search` | Search the package registry |
@@ -302,7 +304,7 @@ loom build [OPTIONS]
     --profile <NAME>       Select a build profile
     --sweep                Run strategy sweep
     --reference <PATH>     Reference build for comparison
-    -j <N>                 Parallelism (parsed, currently unused)
+    -j <N>                 Parallelism (parsed, not yet wired for build)
 ```
 
 ### Simulation flags
@@ -320,6 +322,8 @@ loom sim [OPTIONS]
     -D <DEFINE>            Additional defines
     --plusargs <ARG>        Additional plusargs
     --seed <N>             Random seed
+    --junit <PATH>         Write JUnit XML report
+    -j <N>                 Run up to N tests in parallel
 ```
 
 ## Supported backends

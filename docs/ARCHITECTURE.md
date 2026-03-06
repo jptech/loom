@@ -91,6 +91,11 @@ loom-core/src/
 │   ├── hooks.rs            Lifecycle hooks (pre_build, post_build, etc.)
 │   └── report.rs           Build metrics and report serialization
 │
+├── sim/                    Simulation test runner
+│   ├── compat.rs           Simulator compatibility checking
+│   ├── discovery.rs        Test discovery from component manifests
+│   └── runner.rs           Sequential/parallel test execution (thread::scope)
+│
 └── plugin/                 Plugin trait definitions
     ├── backend.rs           BackendPlugin, BackendCapabilities, BuildResult
     ├── simulator.rs         SimulatorPlugin, SimulatorCapabilities
@@ -341,6 +346,12 @@ The `loom sim` command uses the `SimulatorPlugin` trait:
 Some simulators combine phases (Verilator does compile + elaborate in one step; Icarus Verilog similarly). The trait interface accommodates this by having `elaborate()` return a pass-through result when not needed.
 
 Coverage merging is supported for multi-test regression runs: each simulator implements `merge_coverage()` using its native tool (e.g., `vcover merge` for Questa, `urg` for VCS).
+
+### Parallel test execution
+
+When `-j N` is specified (N > 1), tests run concurrently using `std::thread::scope()` with a counting semaphore (`Mutex<usize>` + `Condvar`) to cap concurrency. Each test gets its own build directory (`.build/<project>/default/tests/<test_name>/sim/`) to avoid file conflicts. The `SimulatorPlugin` trait is `Send + Sync` with `&self` methods, so a single simulator instance is safely shared across threads.
+
+In sequential mode (default), per-phase progress is printed in real time. In parallel mode, compact completion events are printed as tests finish, synchronized via a mutex.
 
 ## Lifecycle hooks
 
