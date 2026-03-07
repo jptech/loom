@@ -2,11 +2,13 @@ use std::path::PathBuf;
 
 use loom_core::assemble::fileset::{AssembledFilesets, FileLanguage};
 use loom_core::build::context::BuildContext;
+use loom_core::build::progress::BuildEvent;
 use loom_core::error::LoomError;
 use loom_core::plugin::backend::BuildResult;
 use loom_core::resolve::resolver::ResolvedProject;
 use loom_core::util::tool_command;
 
+use crate::output_parser;
 use crate::YosysArchitecture;
 
 /// Generate a yosys synthesis script.
@@ -54,6 +56,9 @@ pub fn generate_yosys_script(
         top
     ));
 
+    // Print statistics for reliable parsing
+    script.push_str("stat\n");
+
     Ok(script)
 }
 
@@ -74,8 +79,19 @@ pub fn write_yosys_script(script: &str, context: &BuildContext) -> Result<PathBu
 }
 
 /// Run yosys with the given script.
-pub fn run_yosys(script: &PathBuf, context: &BuildContext) -> Result<BuildResult, LoomError> {
+pub fn run_yosys(
+    script: &PathBuf,
+    context: &BuildContext,
+    progress: Option<&(dyn Fn(BuildEvent) + Send + Sync)>,
+) -> Result<BuildResult, LoomError> {
     let log_path = context.build_dir.join("yosys.log");
+    let start = std::time::Instant::now();
+
+    if let Some(cb) = progress {
+        cb(BuildEvent::PhaseStarted {
+            phase: "synthesis".to_string(),
+        });
+    }
 
     let output = tool_command("yosys")
         .arg("-s")
@@ -88,9 +104,44 @@ pub fn run_yosys(script: &PathBuf, context: &BuildContext) -> Result<BuildResult
         })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let _ = std::fs::write(&log_path, stdout.as_ref());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let log_content = if stderr.is_empty() {
+        stdout.to_string()
+    } else if stdout.is_empty() {
+        stderr.to_string()
+    } else {
+        format!("{}\n{}", stdout, stderr)
+    };
+    let _ = std::fs::write(&log_path, &log_content);
 
+    let elapsed = start.elapsed().as_secs_f64();
     let success = output.status.success();
+
+    if let Some(cb) = progress {
+        // Emit warnings
+        let warnings = output_parser::parse_yosys_warnings(&log_content);
+        for w in &warnings {
+            cb(BuildEvent::Warning(w.clone()));
+        }
+
+        // Emit synthesis summary
+        let stats = output_parser::parse_yosys_stats(&log_content);
+        let warning_count = stats
+            .as_ref()
+            .map(|s| s.warnings_total)
+            .unwrap_or(warnings.len() as u32);
+        cb(BuildEvent::SynthesisSummary {
+            errors: if success { 0 } else { 1 },
+            critical_warnings: 0,
+            warnings: warning_count,
+        });
+
+        cb(BuildEvent::PhaseCompleted {
+            phase: "synthesis".to_string(),
+            elapsed_secs: elapsed,
+            memory_mb: None,
+        });
+    }
 
     Ok(BuildResult {
         success,
@@ -159,5 +210,6 @@ backend = "yosys"
             generate_yosys_script(&resolved, &filesets, &YosysArchitecture::Ice40).unwrap();
         assert!(script.contains("read_verilog /project/src/top.v"));
         assert!(script.contains("synth_ice40 -top top -json design.json"));
+        assert!(script.contains("stat"));
     }
 }

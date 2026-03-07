@@ -1,4 +1,5 @@
 pub mod env_check;
+pub mod output_parser;
 pub mod pack;
 pub mod pnr;
 pub mod synth;
@@ -143,7 +144,7 @@ impl BackendPlugin for YosysNextpnrBackend {
         &self,
         scripts: &[PathBuf],
         context: &BuildContext,
-        _progress: Option<&(dyn Fn(BuildEvent) + Send + Sync)>,
+        progress: Option<&(dyn Fn(BuildEvent) + Send + Sync)>,
     ) -> Result<BuildResult, LoomError> {
         if scripts.is_empty() {
             return Err(LoomError::Internal("No build scripts".to_string()));
@@ -160,22 +161,43 @@ impl BackendPlugin for YosysNextpnrBackend {
             LoomError::Internal(format!("Unknown arch for part '{}'", target.part))
         })?;
 
+        let mut all_phases = Vec::new();
+        let mut all_logs = Vec::new();
+
         // Step 1: Run yosys synthesis
-        let synth_result = synth::run_yosys(&scripts[0], context)?;
+        let synth_result = synth::run_yosys(&scripts[0], context, progress)?;
+        all_logs.extend(synth_result.log_paths.clone());
         if !synth_result.success {
-            return Ok(synth_result);
+            return Ok(BuildResult {
+                log_paths: all_logs,
+                ..synth_result
+            });
         }
+        all_phases.extend(synth_result.phases_completed);
 
         // Step 2: Run nextpnr place & route
         let json_file = context.build_dir.join("design.json");
-        let pnr_result = pnr::run_nextpnr(&arch, &json_file, &target.part, context)?;
+        let pnr_result = pnr::run_nextpnr(&arch, &json_file, &target.part, context, progress)?;
+        all_logs.extend(pnr_result.log_paths.clone());
         if !pnr_result.success {
-            return Ok(pnr_result);
+            return Ok(BuildResult {
+                phases_completed: all_phases,
+                log_paths: all_logs,
+                ..pnr_result
+            });
         }
+        all_phases.extend(pnr_result.phases_completed);
 
         // Step 3: Pack bitstream
-        let pack_result = pack::run_pack(&arch, context)?;
-        Ok(pack_result)
+        let pack_result = pack::run_pack(&arch, context, progress)?;
+        all_logs.extend(pack_result.log_paths.clone());
+        all_phases.extend(pack_result.phases_completed.clone());
+
+        Ok(BuildResult {
+            phases_completed: all_phases,
+            log_paths: all_logs,
+            ..pack_result
+        })
     }
 }
 

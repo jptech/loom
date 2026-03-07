@@ -299,7 +299,7 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     let progress_callback = |event: BuildEvent| match &event {
         BuildEvent::VerboseLine(line) => {
             if verbose_mode {
-                eprintln!("  {} {}", "[vivado]".dimmed(), line);
+                eprintln!("  {} {}", format!("[{}]", backend_name).dimmed(), line);
             }
         }
         BuildEvent::PhaseStarted { phase } => {
@@ -342,8 +342,36 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
         BuildEvent::UtilizationAvailable(util) => {
             captured_metrics.lock().unwrap().utilization = Some(util.clone());
             if show_progress {
-                ui::util_pair("LUT", util.lut_percent, "FF", util.ff_percent, false);
-                ui::util_pair("BRAM", util.bram_percent, "DSP", 0.0, true);
+                // Collect non-trivial resource categories (skip if 0 available = not applicable)
+                let mut entries: Vec<(&str, f64)> = Vec::new();
+                if util.lut_available > 0 {
+                    entries.push(("LUT", util.lut_percent));
+                }
+                if util.ff_available > 0 {
+                    entries.push(("FF", util.ff_percent));
+                }
+                if util.bram_available > 0 {
+                    entries.push(("BRAM", util.bram_percent));
+                }
+                // Show in pairs
+                let mut i = 0;
+                while i < entries.len() {
+                    let is_last = i + 2 >= entries.len();
+                    if i + 1 < entries.len() {
+                        ui::util_pair(
+                            entries[i].0,
+                            entries[i].1,
+                            entries[i + 1].0,
+                            entries[i + 1].1,
+                            is_last,
+                        );
+                        i += 2;
+                    } else {
+                        // Odd entry: show solo as a pair with empty second slot
+                        ui::util_single(entries[i].0, entries[i].1, true);
+                        i += 1;
+                    }
+                }
             }
         }
         BuildEvent::TimingAvailable { stage, timing } => {
