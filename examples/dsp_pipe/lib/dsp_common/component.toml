@@ -1,0 +1,7 @@
+[component]
+name = "dsp/dsp_common"
+version = "1.0.0"
+description = "Common DSP pipeline infrastructure — AXI-Stream skid buffer"
+
+[filesets.synth]
+files = ["rtl/pipeline_skid_buffer.sv"]

@@ -2,10 +2,7 @@
 name = "ice40_ucaspian"
 top_module = "ice40_top"
 description = "uCaspian neuromorphic processor on UPduino v3 (iCE40 UP5K)"
-
-[target]
-part = "ice40up5k-sg48"
-backend = "yosys"
+platform = "upduino_v3"
 
 [filesets.synth]
 files = ["src/ice40_top.sv"]
@@ -14,4 +11,16 @@ constraint_scope = "global"
 
 [dependencies]
 core = ">=1.0.0"
-io = ">=1.0.0"
+io = { version = ">=1.0.0", variant = "ice40" }
+
+[profiles.debug]
+description = "Debug build — reduced FIFO depth"
+[profiles.debug.params]
+fifo_depth = 256
+uart_baud = 3_000_000
+
+[profiles.release]
+description = "Release build — full FIFO depth"
+[profiles.release.params]
+fifo_depth = 1024
+uart_baud = 3_000_000

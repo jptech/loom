@@ -1,0 +1,19 @@
+[platform]
+name = "upduino_v3"
+description = "UPduino v3 — Lattice iCE40 UP5K development board"
+part = "ice40up5k-sg48"
+
+[platform.clocks.sys_clk]
+frequency_mhz = 24.0
+period_ns = 41.667
+description = "Internal HFOSC oscillator at 24 MHz"
+
+[platform.params]
+sys_clk_freq_hz = 24_000_000
+uart_baud = 3_000_000
+
+[platform.variant_defaults]
+tags = ["vendor:lattice"]
+
+[platform.tool]
+backend = "yosys"

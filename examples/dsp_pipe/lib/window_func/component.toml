@@ -1,0 +1,18 @@
+[component]
+name = "dsp/window_func"
+version = "1.0.0"
+description = "Windowing function via ROM lookup table"
+
+[filesets.synth]
+files = ["rtl/window_func.sv"]
+
+[dependencies]
+dsp_common = ">=1.0.0"
+
+[[generators]]
+name = "window_lut"
+plugin = "command"
+command = "python3 scripts/gen_window_lut.py --type hann --size 256 --width 16 --output generated/window_lut.mem"
+inputs = ["scripts/gen_window_lut.py"]
+outputs = ["generated/window_lut.mem"]
+fileset = "synth"

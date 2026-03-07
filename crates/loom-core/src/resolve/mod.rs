@@ -8,7 +8,8 @@ pub mod workspace;
 pub use platform::{find_platform, resolve_platform, substitute_platform_params, ResolvedPlatform};
 pub use registry::{RegistryConfig, RegistryDependencySource, RegistryPackage};
 pub use resolver::{
-    resolve_project, ResolvedComponent, ResolvedProject, WorkspaceDependencySource,
+    resolve_project, EffectiveTarget, ResolvedComponent, ResolvedProject,
+    WorkspaceDependencySource,
 };
 pub use workspace::{
     detect_project_from_cwd, discover_members, find_project, find_workspace_root,

@@ -115,33 +115,30 @@ pub fn validate_pre_build(
         }
     }
 
-    // Check 3: Target specification
-    if let Some(target) = &resolved.project.target {
-        if target.part.is_empty() {
+    // Check 3: Target specification (from [target] block or resolved platform)
+    let effective = resolved.effective_target();
+    if let Some(ref eff) = effective {
+        if eff.part.is_empty() {
             diagnostics.push(make_error(
-                "Project [target].part cannot be empty.",
+                "Project target part cannot be empty.",
                 Some(resolved.project_root.join("project.toml")),
             ));
         }
-        if target.backend.is_empty() {
+        if eff.backend.is_empty() {
             diagnostics.push(make_error(
-                "Project [target].backend cannot be empty.",
+                "Project target backend cannot be empty.",
                 Some(resolved.project_root.join("project.toml")),
             ));
         }
     } else {
         diagnostics.push(make_error(
-            "Project must specify a [target] block with part and backend.",
+            "Project must specify a [target] block or a platform with a part.",
             Some(resolved.project_root.join("project.toml")),
         ));
     }
 
     // Check 4: Tool environment
-    let required_version = resolved
-        .project
-        .target
-        .as_ref()
-        .and_then(|t| t.version.as_deref());
+    let required_version = effective.as_ref().and_then(|t| t.version.as_deref());
 
     match backend.check_environment(required_version) {
         Ok(env_status) if env_status.is_ok() => {

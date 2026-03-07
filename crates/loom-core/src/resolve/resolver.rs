@@ -8,6 +8,14 @@ use crate::manifest::{ComponentManifest, DependencySpec, ProjectManifest};
 
 use super::graph::{DependencyGraph, NodeId};
 
+/// Effective target information derived from either `[target]` or a resolved platform.
+#[derive(Debug, Clone)]
+pub struct EffectiveTarget {
+    pub part: String,
+    pub backend: String,
+    pub version: Option<String>,
+}
+
 /// The output of dependency resolution.
 #[derive(Debug, Clone)]
 pub struct ResolvedProject {
@@ -22,6 +30,30 @@ pub struct ResolvedProject {
     pub active_profile: Option<String>,
     /// Selected variant per component (component_name -> variant_name).
     pub variant_selections: std::collections::HashMap<String, String>,
+}
+
+impl ResolvedProject {
+    /// Get effective target from `[target]` block or resolved platform.
+    /// Returns `None` only if neither is available (virtual platform with no part).
+    pub fn effective_target(&self) -> Option<EffectiveTarget> {
+        if let Some(ref target) = self.project.target {
+            return Some(EffectiveTarget {
+                part: target.part.clone(),
+                backend: target.backend.clone(),
+                version: target.version.clone(),
+            });
+        }
+        if let Some(ref platform) = self.platform {
+            if let Some(ref part) = platform.part {
+                return Some(EffectiveTarget {
+                    part: part.clone(),
+                    backend: platform.backend.clone().unwrap_or_else(|| "vivado".to_string()),
+                    version: platform.backend_version.clone(),
+                });
+            }
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone)]

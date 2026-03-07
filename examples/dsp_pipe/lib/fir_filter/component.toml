@@ -1,0 +1,18 @@
+[component]
+name = "dsp/fir_filter"
+version = "1.0.0"
+description = "Transposed-form FIR filter with generated coefficient ROM"
+
+[filesets.synth]
+files = ["rtl/fir_mac.sv", "rtl/fir_filter.sv"]
+
+[dependencies]
+dsp_common = ">=1.0.0"
+
+[[generators]]
+name = "fir_coeffs"
+plugin = "command"
+command = "python3 scripts/gen_fir_coeffs.py --order 32 --width 16 --cutoff 0.25 --output generated/fir_coeffs.mem"
+inputs = ["scripts/gen_fir_coeffs.py"]
+outputs = ["generated/fir_coeffs.mem"]
+fileset = "synth"

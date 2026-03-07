@@ -9,6 +9,7 @@ workspace_members = [
     "lib/counter",
     "lib/seg7_driver",
     "lib/uart",
+    "platforms/basys3",
     "projects/basys3_uart",
 ]
 

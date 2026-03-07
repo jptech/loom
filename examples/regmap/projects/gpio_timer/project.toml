@@ -1,0 +1,37 @@
+[project]
+name = "gpio_timer"
+top_module = "gpio_timer_top"
+description = "GPIO+Timer SoC peripheral — demonstrates generators, variants, and dimensional profiles"
+platform = "arty_a7"
+
+[filesets.synth]
+files = ["src/gpio_timer_top.sv"]
+
+[dependencies]
+regmap_core = ">=1.0.0"
+
+[profile_dimensions.board]
+description = "Target board"
+default = "arty_a7"
+[profile_dimensions.board.choices.arty_a7]
+platform = "arty_a7"
+[profile_dimensions.board.choices.icebreaker]
+platform = "icebreaker"
+[profile_dimensions.board.choices.sim]
+platform = "sim_generic"
+
+[profile_dimensions.tier]
+description = "Feature tier"
+default = "full"
+[profile_dimensions.tier.choices.full]
+description = "16 GPIO, 32-bit timer, interrupts"
+[profile_dimensions.tier.choices.full.params]
+gpio_width = 16
+timer_width = 32
+enable_interrupts = true
+[profile_dimensions.tier.choices.lite]
+description = "8 GPIO, 16-bit timer, no interrupts"
+[profile_dimensions.tier.choices.lite.params]
+gpio_width = 8
+timer_width = 16
+enable_interrupts = false

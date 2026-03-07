@@ -9,6 +9,14 @@ files = ["rtl/alu.sv"]
 [filesets.sim]
 files = ["tb/tb_alu_basic.sv", "tb/tb_alu_random.sv"]
 
+[[generators]]
+name = "alu_test_vectors"
+plugin = "command"
+command = "python3 gen/gen_test_vectors.py --width 8 --count 64 --output generated/alu_test_vectors.svh"
+inputs = ["gen/gen_test_vectors.py"]
+outputs = ["generated/alu_test_vectors.svh"]
+fileset = "sim"
+
 # --- Tests ---
 
 [[tests]]

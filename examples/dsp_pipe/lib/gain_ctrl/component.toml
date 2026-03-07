@@ -1,0 +1,10 @@
+[component]
+name = "dsp/gain_ctrl"
+version = "1.0.0"
+description = "Programmable gain control with saturation detection"
+
+[filesets.synth]
+files = ["rtl/gain_ctrl.sv"]
+
+[dependencies]
+dsp_common = ">=1.0.0"

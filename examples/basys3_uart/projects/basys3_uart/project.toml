@@ -2,6 +2,7 @@
 name = "basys3_uart"
 top_module = "top"
 description = "UART echo with 7-segment display on Basys 3"
+platform = "basys3"
 
 [target]
 part = "xc7a35tcpg236-1"
@@ -16,3 +17,13 @@ constraint_scope = "global"
 clk_gen = ">=1.0.0"
 uart = ">=1.0.0"
 seg7_driver = ">=1.0.0"
+
+[profiles.fast_baud]
+description = "921600 baud — high speed UART"
+[profiles.fast_baud.params]
+baud_rate = 921600
+
+[profiles.slow_baud]
+description = "9600 baud — standard UART speed"
+[profiles.slow_baud.params]
+baud_rate = 9600

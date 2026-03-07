@@ -17,8 +17,8 @@ use loom_core::resolve::lockfile::{
     check_staleness, generate_lockfile, load_lockfile, write_lockfile, LockfileStatus,
 };
 use loom_core::resolve::{
-    discover_members, find_workspace_root, load_all_components, resolve_project,
-    resolve_project_selection, WorkspaceDependencySource,
+    discover_members, find_platform, find_workspace_root, load_all_components, resolve_platform,
+    resolve_project, resolve_project_selection, WorkspaceDependencySource,
 };
 
 use crate::backend_registry::get_backend;
@@ -106,12 +106,18 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     }
 
     let source = WorkspaceDependencySource::new(all_components);
-    let resolved = resolve_project(
+    let mut resolved = resolve_project(
         project_manifest,
         project_root,
         workspace_root.clone(),
         &source,
     )?;
+
+    // Resolve platform if specified
+    if let Some(ref platform_name) = resolved.project.project.platform {
+        let (platform_root, platform_manifest) = find_platform(&members, platform_name)?;
+        resolved.platform = Some(resolve_platform(&platform_manifest, &platform_root));
+    }
 
     // Check lockfile
     match load_lockfile(&workspace_root)? {
@@ -134,22 +140,30 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     // -- VALIDATE --
     let mut build_context = BuildContext::new(resolved.clone(), workspace_root.clone());
     build_context.cancelled = ctx.cancelled.clone();
-    let backend_name = resolved
-        .project
-        .target
+    let effective_target = resolved.effective_target();
+    let backend_name = effective_target
         .as_ref()
         .map(|t| t.backend.as_str())
         .unwrap_or("vivado");
     let backend = get_backend(backend_name)?;
     let validation = validate_pre_build(&resolved, &filesets, &build_context, backend.as_ref())?;
 
+    // Derive display strings from effective target
+    let part_str = effective_target
+        .as_ref()
+        .map(|t| t.part.as_str())
+        .unwrap_or("(virtual)");
+    let backend_str = effective_target
+        .as_ref()
+        .map(|t| t.backend.as_str())
+        .unwrap_or("none");
+
     // Print header after resolve succeeds
     if !ctx.quiet {
-        let target = resolved.project.target.as_ref().unwrap();
         ui::header(&[
             ("\u{00B7}", &resolved.project.project.name),
-            ("\u{2192}", &target.part),
-            ("\u{00B7}", &target.backend),
+            ("\u{2192}", part_str),
+            ("\u{00B7}", backend_str),
         ]);
 
         ui::status(
@@ -209,11 +223,13 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
 
     // -- DRY RUN --
     if args.dry_run {
-        let target = resolved.project.target.as_ref().unwrap();
         if ctx.json {
             let plan = serde_json::json!({
                 "project": resolved.project.project.name,
-                "target": { "part": target.part, "backend": target.backend },
+                "target": {
+                    "part": effective_target.as_ref().map(|t| t.part.as_str()).unwrap_or("(virtual)"),
+                    "backend": effective_target.as_ref().map(|t| t.backend.as_str()).unwrap_or("none"),
+                },
                 "strategy": args.strategy,
                 "components": resolved.resolved_components.len(),
                 "synth_files": filesets.synth_files.len(),
@@ -229,9 +245,9 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
         } else {
             ui::blank();
             ui::status(Icon::Dot, "Build", "dry run — would execute");
-            ui::summary_detail("Target", &target.part);
+            ui::summary_detail("Target", part_str);
             ui::summary_detail("Strategy", &args.strategy);
-            ui::summary_detail("Backend", &target.backend);
+            ui::summary_detail("Backend", backend_str);
             if let Some(ref stop) = args.stop_after {
                 ui::summary_detail("Stop after", stop);
             }
@@ -507,12 +523,20 @@ fn handle_build_result(
     metrics: Option<BuildMetrics>,
 ) -> Result<(), LoomError> {
     // Generate and save build report
-    let target = resolved.project.target.as_ref().unwrap();
+    let effective = resolved.effective_target();
+    let part = effective
+        .as_ref()
+        .map(|t| t.part.as_str())
+        .unwrap_or("(virtual)");
+    let version = effective
+        .as_ref()
+        .and_then(|t| t.version.as_deref())
+        .unwrap_or("unknown");
     let mut report = BuildReport::from_build_result(
         &resolved.project.project.name,
         backend_name,
-        target.version.as_deref().unwrap_or("unknown"),
-        &target.part,
+        version,
+        part,
         strategy,
         build_result,
         &resolved.workspace_root,

@@ -1,0 +1,27 @@
+[component]
+name = "soc/regmap_core"
+version = "1.0.0"
+description = "GPIO + Timer peripheral with generated register file"
+
+[filesets.synth]
+files = ["rtl/native_bus_pkg.sv", "rtl/gpio_timer_core.sv"]
+
+[[generators]]
+name = "regmap_gen"
+plugin = "command"
+command = "python3 scripts/gen_regmap.py spec/gpio_timer_regs.json generated/"
+inputs = ["spec/gpio_timer_regs.json", "scripts/gen_regmap.py"]
+outputs = ["generated/gpio_timer_regs.sv", "generated/gpio_timer_regs_pkg.sv"]
+fileset = "synth"
+
+[variants.axilite]
+description = "AXI-Lite register interface wrapper"
+tags = ["bus:axilite"]
+[variants.axilite.filesets.synth]
+add_files = ["rtl/axilite_regmap.sv"]
+
+[variants.simple]
+description = "Simple memory-mapped register interface wrapper"
+tags = ["bus:simple"]
+[variants.simple.filesets.synth]
+add_files = ["rtl/simple_regmap.sv"]

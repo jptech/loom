@@ -7,6 +7,8 @@ generated_at = "2026-03-05T06:32:17.055376100+00:00"
 workspace_members = [
     "lib/io",
     "lib/ucaspian_core",
+    "platforms/mimas_a7",
+    "platforms/upduino_v3",
     "projects/artix7_ucaspian",
     "projects/ice40_ucaspian",
 ]
@@ -15,7 +17,7 @@ workspace_members = [
 name = "ucaspian/io"
 version = "1.0.0"
 source = "workspace:lib/io"
-checksum = "sha256:6b166c7f90b88c60b2caa0a87cfcb424e35b90a1fbe0cc10c6a819a67fe86939"
+checksum = "sha256:7a44ab1ce8b6791f1c2a2d15a66c6644ae7df1f792913417d2ec8f3ab86f6a8c"
 dependencies = []
 
 [[package]]
