@@ -123,6 +123,18 @@ pub fn util_pair(n1: &str, p1: f64, n2: &str, p2: f64, is_last: bool) {
     );
 }
 
+/// Print a single utilization entry (for odd counts).
+pub fn util_single(name: &str, pct: f64, is_last: bool) {
+    let prefix = if is_last { "\u{2514}" } else { "\u{251C}" };
+    eprintln!(
+        "    {} {:<4} {:>5.1}%  {}",
+        prefix,
+        name,
+        pct,
+        util_bar(pct),
+    );
+}
+
 // ── Timing ───────────────────────────────────────────────────────────
 
 /// Print a timing line with colored pass/fail indicators.

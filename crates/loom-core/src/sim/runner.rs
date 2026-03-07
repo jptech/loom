@@ -22,6 +22,8 @@ pub struct SimRunnerOptions {
     pub seed: Option<u64>,
     /// Enable coverage collection.
     pub enable_coverage: bool,
+    /// Enable waveform dumping.
+    pub waves: bool,
     /// Path to write JUnit XML output.
     pub junit_path: Option<PathBuf>,
     /// Number of tests to run in parallel (1 = sequential).
@@ -378,8 +380,16 @@ fn build_sim_options(dt: &DiscoveredTest, cli_options: &SimRunnerOptions) -> Sim
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("test");
+            // cocotb 2.x uses COCOTB_TEST_MODULES; set both for 1.x compat
+            extra_args.push(format!("COCOTB_TEST_MODULES={}", module_name));
             extra_args.push(format!("COCOTB_MODULE={}", module_name));
             extra_args.push(format!("COCOTB_TOPLEVEL={}", dt.test.top));
+
+            // PYTHONPATH: directory containing the Python test module
+            let source_path = dt.component_path.join(source);
+            if let Some(parent) = source_path.parent() {
+                extra_args.push(format!("PYTHONPATH={}", parent.display()));
+            }
         }
     }
 
@@ -391,6 +401,7 @@ fn build_sim_options(dt: &DiscoveredTest, cli_options: &SimRunnerOptions) -> Sim
         timeout_secs: timeout,
         enable_coverage: cli_options.enable_coverage,
         gui: false,
+        waves: cli_options.waves,
         extra_args,
     }
 }

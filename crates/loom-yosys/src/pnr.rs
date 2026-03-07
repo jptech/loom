@@ -1,10 +1,14 @@
+use std::io::BufRead;
 use std::path::Path;
+use std::process::Stdio;
 
 use loom_core::build::context::BuildContext;
+use loom_core::build::progress::BuildEvent;
 use loom_core::error::LoomError;
 use loom_core::plugin::backend::BuildResult;
 use loom_core::util::tool_command;
 
+use crate::output_parser;
 use crate::YosysArchitecture;
 
 /// Run nextpnr for the given architecture.
@@ -13,8 +17,16 @@ pub fn run_nextpnr(
     json_file: &Path,
     part: &str,
     context: &BuildContext,
+    progress: Option<&(dyn Fn(BuildEvent) + Send + Sync)>,
 ) -> Result<BuildResult, LoomError> {
     let log_path = context.build_dir.join("nextpnr.log");
+    let start = std::time::Instant::now();
+
+    if let Some(cb) = progress {
+        cb(BuildEvent::PhaseStarted {
+            phase: "place".to_string(),
+        });
+    }
     let output_file = match arch {
         YosysArchitecture::Ice40 => context.build_dir.join("design.asc"),
         YosysArchitecture::Ecp5 => context.build_dir.join("design.config"),
@@ -69,15 +81,114 @@ pub fn run_nextpnr(
         }
     }
 
-    let output = cmd.output().map_err(|e| LoomError::ToolNotFound {
+    // Stream stderr to detect place→route transition live
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().map_err(|e| LoomError::ToolNotFound {
         tool: arch.nextpnr_binary().to_string(),
         message: e.to_string(),
     })?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let _ = std::fs::write(&log_path, stdout.as_ref());
+    let stderr_pipe = child.stderr.take();
+    let mut log_lines = Vec::new();
+    let mut place_elapsed: Option<f64> = None;
+    let mut route_started = false;
 
+    if let Some(stderr_reader) = stderr_pipe {
+        let reader = std::io::BufReader::new(stderr_reader);
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => break,
+            };
+
+            // Detect routing phase start: nextpnr prints "Info: Routing.." or "Routing design.."
+            if !route_started && line.contains("Routing") && !line.contains("Routing globals") {
+                route_started = true;
+                place_elapsed = Some(start.elapsed().as_secs_f64());
+                if let Some(cb) = progress {
+                    cb(BuildEvent::PhaseCompleted {
+                        phase: "place".to_string(),
+                        elapsed_secs: place_elapsed.unwrap(),
+                        memory_mb: None,
+                    });
+                    cb(BuildEvent::PhaseStarted {
+                        phase: "route".to_string(),
+                    });
+                }
+            }
+
+            log_lines.push(line);
+        }
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| LoomError::ToolNotFound {
+            tool: arch.nextpnr_binary().to_string(),
+            message: e.to_string(),
+        })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr_remaining = String::from_utf8_lossy(&output.stderr);
+    // Combine: streamed stderr lines + any remaining stdout/stderr
+    let mut log_content = log_lines.join("\n");
+    if !stderr_remaining.is_empty() {
+        if !log_content.is_empty() {
+            log_content.push('\n');
+        }
+        log_content.push_str(&stderr_remaining);
+    }
+    if !stdout.is_empty() {
+        if !log_content.is_empty() {
+            log_content.push('\n');
+        }
+        log_content.push_str(&stdout);
+    }
+    let _ = std::fs::write(&log_path, &log_content);
+
+    let total_elapsed = start.elapsed().as_secs_f64();
     let success = output.status.success();
+
+    if let Some(cb) = progress {
+        // Parse and emit utilization metrics
+        if let Some(util) = output_parser::parse_nextpnr_utilization(&log_content) {
+            let metrics = output_parser::to_utilization_metrics(&util);
+            cb(BuildEvent::UtilizationAvailable(metrics));
+        }
+
+        // Parse and emit timing metrics
+        let clocks = output_parser::parse_nextpnr_timing(&log_content);
+        if !clocks.is_empty() {
+            let timing = output_parser::to_timing_metrics(&clocks);
+            cb(BuildEvent::TimingAvailable {
+                stage: "post_route".to_string(),
+                timing,
+            });
+        }
+
+        // If we never detected the routing transition, emit both completions now
+        if !route_started {
+            cb(BuildEvent::PhaseCompleted {
+                phase: "place".to_string(),
+                elapsed_secs: total_elapsed / 2.0,
+                memory_mb: None,
+            });
+            cb(BuildEvent::PhaseCompleted {
+                phase: "route".to_string(),
+                elapsed_secs: total_elapsed / 2.0,
+                memory_mb: None,
+            });
+        } else {
+            let route_elapsed = total_elapsed - place_elapsed.unwrap_or(0.0);
+            cb(BuildEvent::PhaseCompleted {
+                phase: "route".to_string(),
+                elapsed_secs: route_elapsed,
+                memory_mb: None,
+            });
+        }
+    }
 
     Ok(BuildResult {
         success,

@@ -1,4 +1,5 @@
 use loom_core::build::context::BuildContext;
+use loom_core::build::progress::BuildEvent;
 use loom_core::error::LoomError;
 use loom_core::plugin::backend::BuildResult;
 use loom_core::util::tool_command;
@@ -9,8 +10,16 @@ use crate::YosysArchitecture;
 pub fn run_pack(
     arch: &YosysArchitecture,
     context: &BuildContext,
+    progress: Option<&(dyn Fn(BuildEvent) + Send + Sync)>,
 ) -> Result<BuildResult, LoomError> {
     let log_path = context.build_dir.join("pack.log");
+    let start = std::time::Instant::now();
+
+    if let Some(cb) = progress {
+        cb(BuildEvent::PhaseStarted {
+            phase: "bitstream".to_string(),
+        });
+    }
 
     let (input_file, output_file) = match arch {
         YosysArchitecture::Ice40 => (
@@ -38,9 +47,26 @@ pub fn run_pack(
     })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let _ = std::fs::write(&log_path, stdout.as_ref());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let log_content = if stderr.is_empty() {
+        stdout.to_string()
+    } else if stdout.is_empty() {
+        stderr.to_string()
+    } else {
+        format!("{}\n{}", stdout, stderr)
+    };
+    let _ = std::fs::write(&log_path, &log_content);
 
+    let elapsed = start.elapsed().as_secs_f64();
     let success = output.status.success();
+
+    if let Some(cb) = progress {
+        cb(BuildEvent::PhaseCompleted {
+            phase: "bitstream".to_string(),
+            elapsed_secs: elapsed,
+            memory_mb: None,
+        });
+    }
 
     Ok(BuildResult {
         success,

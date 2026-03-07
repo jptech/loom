@@ -11,7 +11,7 @@ from cocotb.triggers import RisingEdge, ClockCycles
 @cocotb.test()
 async def test_alu_add(dut):
     """Test ALU ADD operation."""
-    clock = Clock(dut.clk, 10, units="ns")
+    clock = Clock(dut.clk, 10, unit="ns")
     cocotb.start_soon(clock.start())
 
     dut.rst_n.value = 0
@@ -32,7 +32,7 @@ async def test_alu_add(dut):
 @cocotb.test()
 async def test_alu_sub(dut):
     """Test ALU SUB operation."""
-    clock = Clock(dut.clk, 10, units="ns")
+    clock = Clock(dut.clk, 10, unit="ns")
     cocotb.start_soon(clock.start())
 
     dut.rst_n.value = 0
