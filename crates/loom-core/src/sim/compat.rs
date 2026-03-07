@@ -34,8 +34,18 @@ pub fn check_runner_compatibility(
     match runner {
         None | Some("hdl") => None,
         Some("cocotb") => {
-            // Cocotb works with any simulator via VPI — no simulator restriction.
-            // But we check that cocotb is installed.
+            // Cocotb requires VPI module loading, which needs explicit backend
+            // support (passing -m to vvp, or --vpi to verilator). Currently
+            // only xsim/questa/vcs/xcelium wire this up.
+            let supported_sims = ["xsim", "questa", "vcs", "xcelium"];
+            let sim_name = simulator.plugin_name();
+            if !supported_sims.contains(&sim_name) {
+                return Some(format!(
+                    "cocotb not yet supported with {} (VPI module loading not wired up)",
+                    sim_name
+                ));
+            }
+            // Check that cocotb is installed
             match std::process::Command::new("cocotb-config")
                 .arg("--version")
                 .output()

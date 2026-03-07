@@ -44,6 +44,10 @@ pub struct SimArgs {
     #[arg(long)]
     pub coverage: bool,
 
+    /// Enable waveform dumping (VCD/FST)
+    #[arg(long)]
+    pub waves: bool,
+
     /// Additional defines
     #[arg(short = 'D', long = "define")]
     pub defines: Vec<String>,
@@ -196,6 +200,7 @@ fn run_single(
         timeout_secs: Some(3600),
         enable_coverage: args.coverage,
         gui: false,
+        waves: args.waves,
         extra_args: vec![],
     };
 
@@ -406,6 +411,7 @@ fn run_multi_test(
         plusargs: args.plusargs,
         seed: args.seed,
         enable_coverage: args.coverage,
+        waves: args.waves,
         junit_path: args.junit,
         jobs: args.jobs,
     };

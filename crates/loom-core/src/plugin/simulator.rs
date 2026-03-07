@@ -58,6 +58,7 @@ pub struct SimOptions {
     pub timeout_secs: Option<u64>,
     pub enable_coverage: bool,
     pub gui: bool,
+    pub waves: bool,
     pub extra_args: Vec<String>,
 }
 

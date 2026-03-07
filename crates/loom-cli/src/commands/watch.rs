@@ -127,6 +127,7 @@ pub fn run(args: WatchArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
                         regression: false,
                         check_compat: false,
                         coverage: false,
+                        waves: false,
                         defines: vec![],
                         plusargs: vec![],
                         seed: None,

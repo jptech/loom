@@ -22,6 +22,8 @@ pub struct SimRunnerOptions {
     pub seed: Option<u64>,
     /// Enable coverage collection.
     pub enable_coverage: bool,
+    /// Enable waveform dumping.
+    pub waves: bool,
     /// Path to write JUnit XML output.
     pub junit_path: Option<PathBuf>,
     /// Number of tests to run in parallel (1 = sequential).
@@ -391,6 +393,7 @@ fn build_sim_options(dt: &DiscoveredTest, cli_options: &SimRunnerOptions) -> Sim
         timeout_secs: timeout,
         enable_coverage: cli_options.enable_coverage,
         gui: false,
+        waves: cli_options.waves,
         extra_args,
     }
 }

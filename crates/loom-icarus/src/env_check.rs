@@ -45,6 +45,8 @@ fn find_icarus_with_version() -> Result<(PathBuf, String), LoomError> {
                 .to_string();
             if !path.is_empty() {
                 if let Ok(version) = query_iverilog_version(&PathBuf::from(&path)) {
+                    // Also verify that vvp (the simulation runtime) is available
+                    check_vvp_available()?;
                     return Ok((PathBuf::from(path), version));
                 }
             }
@@ -54,6 +56,28 @@ fn find_icarus_with_version() -> Result<(PathBuf, String), LoomError> {
     Err(LoomError::ToolNotFound {
         tool: "iverilog".to_string(),
         message: "Icarus Verilog not found. Install with: apt install iverilog (Linux), brew install icarus-verilog (macOS), or download from iverilog.icarus.com (Windows).".to_string(),
+    })
+}
+
+/// Verify that the `vvp` simulation runtime is on PATH.
+///
+/// Icarus needs both `iverilog` (compiler) and `vvp` (runtime). They are
+/// normally installed together, but partial installs or broken PATH can
+/// leave one without the other.
+fn check_vvp_available() -> Result<(), LoomError> {
+    let cmd_name = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
+    if let Ok(output) = Command::new(cmd_name).arg("vvp").output() {
+        if output.status.success() {
+            return Ok(());
+        }
+    }
+    Err(LoomError::ToolNotFound {
+        tool: "vvp".to_string(),
+        message: "iverilog found but vvp (simulation runtime) is missing. Both are required. Reinstall Icarus Verilog.".to_string(),
     })
 }
 

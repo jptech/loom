@@ -170,12 +170,27 @@ impl SimulatorPlugin for IcarusBackend {
         write_sim_log(&log_path, &stdout, &stderr);
 
         let scan = scan_sim_output(&combined);
-        let success = output.status.success() && !scan.has_fail;
-        let errors: Vec<String> = scan
+        let success = scan.is_pass(output.status.success());
+        let mut errors: Vec<String> = scan
             .fail_lines
             .into_iter()
             .chain(scan.error_lines)
             .collect();
+        if !success && errors.is_empty() {
+            if scan.empty_output {
+                errors.push("simulation produced no output (silent failure)".to_string());
+            } else if !output.status.success() {
+                errors.push(format!(
+                    "simulation exited with code {}",
+                    output.status.code().unwrap_or(-1)
+                ));
+            } else {
+                errors.push(
+                    "no PASS/FAIL/$finish found in output — add self-checking to your testbench"
+                        .to_string(),
+                );
+            }
+        }
 
         Ok(SimResult {
             success,

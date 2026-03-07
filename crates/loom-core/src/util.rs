@@ -107,12 +107,16 @@ pub struct SimOutputScan {
     pub has_pass: bool,
     /// Found "FAIL:" or "FAIL " in output
     pub has_fail: bool,
+    /// Found "$finish" or "PASSED" (simulation completed normally)
+    pub has_finish: bool,
     /// Lines containing FAIL patterns
     pub fail_lines: Vec<String>,
     /// Lines containing "Error", "ERROR", or "FATAL"
     pub error_lines: Vec<String>,
     /// Count of warning lines
     pub warning_count: usize,
+    /// True if output was completely empty (no lines at all)
+    pub empty_output: bool,
 }
 
 /// Write combined simulation stdout+stderr to a log file.
@@ -128,8 +132,19 @@ pub fn write_sim_log(log_path: &Path, stdout: &str, stderr: &str) {
 }
 
 /// Scan simulation output for self-checking testbench patterns.
+///
+/// Pass/fail logic used by backends:
+/// - `has_fail` → always fail (regardless of exit code)
+/// - `has_pass` or `has_finish` → evidence the testbench ran to completion
+/// - `empty_output` → no output at all, likely a silent failure
+///
+/// Backends should use [`SimOutputScan::is_pass`] for the final verdict.
 pub fn scan_sim_output(output: &str) -> SimOutputScan {
-    let mut scan = SimOutputScan::default();
+    let trimmed = output.trim();
+    let mut scan = SimOutputScan {
+        empty_output: trimmed.is_empty(),
+        ..Default::default()
+    };
     for line in output.lines() {
         if line.contains("PASS:") || line.contains("PASS ") {
             scan.has_pass = true;
@@ -144,8 +159,27 @@ pub fn scan_sim_output(output: &str) -> SimOutputScan {
         if line.contains("WARNING") || line.contains("Warning") {
             scan.warning_count += 1;
         }
+        if line.contains("$finish") || line.contains("PASSED") {
+            scan.has_finish = true;
+        }
     }
     scan
+}
+
+impl SimOutputScan {
+    /// Determine if the simulation passed, given the process exit code.
+    ///
+    /// A test passes only when ALL of these hold:
+    /// 1. The process exited successfully (exit code 0)
+    /// 2. No `FAIL:` patterns were found in the output
+    /// 3. The output is not empty (guards against silent failures)
+    /// 4. There is evidence the testbench completed (`PASS:`, `$finish`, or `PASSED`)
+    ///
+    /// If the output has content but no pass/fail/finish markers, the test
+    /// is considered indeterminate and fails with an explanatory error.
+    pub fn is_pass(&self, exit_success: bool) -> bool {
+        exit_success && !self.has_fail && !self.empty_output && (self.has_pass || self.has_finish)
+    }
 }
 
 #[cfg(test)]
@@ -262,6 +296,43 @@ mod tests {
     fn test_scan_warnings() {
         let scan = scan_sim_output("WARNING: clk glitch\nWarning: width mismatch\nall ok");
         assert_eq!(scan.warning_count, 2);
+    }
+
+    #[test]
+    fn test_scan_finish_detected() {
+        let scan = scan_sim_output("some output\n$finish called at 100ns\n");
+        assert!(scan.has_finish);
+        assert!(scan.is_pass(true));
+    }
+
+    #[test]
+    fn test_scan_empty_output_fails() {
+        let scan = scan_sim_output("");
+        assert!(scan.empty_output);
+        assert!(!scan.is_pass(true)); // exit 0 + empty = fail
+    }
+
+    #[test]
+    fn test_scan_no_markers_fails() {
+        // Output exists but no PASS/FAIL/$finish — indeterminate
+        let scan = scan_sim_output("some random simulator output\nno markers here");
+        assert!(!scan.empty_output);
+        assert!(!scan.has_pass);
+        assert!(!scan.has_finish);
+        assert!(!scan.is_pass(true)); // no evidence of completion
+    }
+
+    #[test]
+    fn test_scan_pass_with_exit_0() {
+        let scan = scan_sim_output("PASS: all tests passed");
+        assert!(scan.is_pass(true));
+        assert!(!scan.is_pass(false)); // exit non-zero still fails
+    }
+
+    #[test]
+    fn test_scan_fail_overrides_pass() {
+        let scan = scan_sim_output("PASS: test A\nFAIL: test B\n$finish");
+        assert!(!scan.is_pass(true)); // FAIL takes priority
     }
 
     #[test]
