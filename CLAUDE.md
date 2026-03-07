@@ -44,16 +44,16 @@ crates/
 │   │               #                      reporter.rs, mod.rs
 │   ├── util.rs
 │   └── error.rs    #   LoomError enum, exit code mapping
-├── loom-vivado/    # Library. Vivado backend: tcl_gen.rs, executor.rs, env_check.rs, ooc.rs
-├── loom-quartus/   # Library. Quartus backend: tcl_gen.rs, executor.rs, env_check.rs
-├── loom-yosys/     # Library. yosys+nextpnr backend: synth.rs, pnr.rs, pack.rs, env_check.rs
-├── loom-radiant/   # Library. Lattice Radiant backend: tcl_gen.rs, executor.rs, env_check.rs
-├── loom-xsim/      # Library. Vivado Simulator: compile.rs, elaborate.rs, simulate.rs, env_check.rs
-├── loom-verilator/ # Library. Verilator simulator: env_check.rs
-├── loom-icarus/    # Library. Icarus Verilog simulator: env_check.rs
-├── loom-questa/    # Library. Siemens Questa simulator: env_check.rs
-├── loom-vcs/       # Library. Synopsys VCS simulator: env_check.rs
-└── loom-xcelium/   # Library. Cadence Xcelium simulator: env_check.rs
+├── loom-vivado/    # Library. Vivado backend (preliminary)
+├── loom-yosys/     # Library. yosys+nextpnr backend (preliminary, ice40 only)
+├── loom-quartus/   # Library. Quartus backend (planned)
+├── loom-radiant/   # Library. Lattice Radiant backend (planned)
+├── loom-xsim/      # Library. Vivado Simulator (preliminary)
+├── loom-verilator/ # Library. Verilator simulator (preliminary)
+├── loom-icarus/    # Library. Icarus Verilog simulator (preliminary)
+├── loom-questa/    # Library. Siemens Questa simulator (planned)
+├── loom-vcs/       # Library. Synopsys VCS simulator (planned)
+└── loom-xcelium/   # Library. Cadence Xcelium simulator (planned)
 ```
 
 ### Build Pipeline

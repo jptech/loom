@@ -23,13 +23,15 @@
 
 ---
 
-Loom replaces ad-hoc Tcl scripts and Makefiles with TOML manifests, a dependency resolver, and a single CLI that drives Vivado, Quartus, yosys/nextpnr, and Radiant.
+> **Early-stage project.** Loom has preliminary support for Vivado, xsim, yosys, nextpnr (ice40), Icarus Verilog, and Verilator. These have been used in practice but are not yet thoroughly tested or covered by CI. Other backends and simulators listed below exist as scaffolding for future support and should not be expected to work. Use at your own risk.
+
+Loom replaces ad-hoc Tcl scripts and Makefiles with TOML manifests, a dependency resolver, and a single CLI that drives synthesis and simulation tools.
 
 ## Why Loom?
 
 - **Declarative manifests** -- TOML files (`component.toml`, `project.toml`, `workspace.toml`) describe your design; Loom figures out the rest.
 - **Workspace-native** -- First-class support for monorepos with shared IP libraries and multiple target projects.
-- **Vendor-agnostic core** -- One project structure works across AMD/Xilinx, Intel, Lattice, and open-source toolchains.
+- **Vendor-agnostic core** -- One project structure works across AMD/Xilinx and open-source toolchains, with more planned.
 - **Deterministic builds** -- Lockfile pins exact dependency versions. Cache keys track inputs so generators only re-run when needed.
 
 ## Installation
@@ -330,21 +332,23 @@ loom sim [OPTIONS]
 
 | Backend | Toolchain | Constraint format | Status |
 |---------|-----------|-------------------|--------|
-| `vivado` | AMD/Xilinx Vivado | XDC | Full |
-| `quartus` | Intel Quartus Prime | SDC, QSF | Full |
-| `yosys` | yosys + nextpnr | PCF, LPF, CST | Full (ice40, ECP5, Gowin) |
-| `radiant` | Lattice Radiant | PDC, LPF | Full |
+| `vivado` | AMD/Xilinx Vivado | XDC | Preliminary |
+| `yosys` | yosys + nextpnr | PCF, LPF, CST | Preliminary (ice40 only) |
+| `quartus` | Intel Quartus Prime | SDC, QSF | Planned |
+| `radiant` | Lattice Radiant | PDC, LPF | Planned |
 
 ## Supported simulators
 
-| Simulator | Tool | SystemVerilog | VHDL | UVM | Coverage |
-|-----------|------|:---:|:---:|:---:|:---:|
-| `xsim` | Xilinx Vivado Simulator | Full | Yes | No | Code |
-| `verilator` | Verilator | Partial | No | No | Code |
-| `icarus` | Icarus Verilog | Partial | No | No | No |
-| `questa` | Siemens Questa | Full | Yes | Yes | All |
-| `vcs` | Synopsys VCS | Full | Yes | Yes | All |
-| `xcelium` | Cadence Xcelium | Full | Yes | Yes | All |
+| Simulator | Tool | Status |
+|-----------|------|--------|
+| `xsim` | Xilinx Vivado Simulator | Preliminary |
+| `verilator` | Verilator | Preliminary |
+| `icarus` | Icarus Verilog | Preliminary |
+| `questa` | Siemens Questa | Planned |
+| `vcs` | Synopsys VCS | Planned |
+| `xcelium` | Cadence Xcelium | Planned |
+
+> **Preliminary** = has been used in practice but not thoroughly tested or covered by CI. **Planned** = trait implementation exists as scaffolding but has never been run against the actual tool. Contributions and bug reports welcome.
 
 ## Build pipeline
 

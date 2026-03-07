@@ -1,3 +1,9 @@
+//! Cadence Xcelium simulator backend.
+//!
+//! **Status: planned.** This crate has a scaffolded `SimulatorPlugin` implementation
+//! but has never been run against the actual Xcelium toolchain. It will likely
+//! require fixes before it works correctly.
+
 pub mod env_check;
 
 use std::path::{Path, PathBuf};
