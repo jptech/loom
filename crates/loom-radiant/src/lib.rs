@@ -1,3 +1,9 @@
+//! Lattice Radiant synthesis backend.
+//!
+//! **Status: planned.** This crate has a scaffolded `BackendPlugin` implementation
+//! but has never been run against the actual Radiant toolchain. It will likely
+//! require fixes before it works correctly.
+
 pub mod env_check;
 pub mod executor;
 pub mod tcl_gen;

@@ -5,18 +5,40 @@
 *.mcs
 *.ltx
 
+# Loom working directories
+.loom/
+
 # Vivado working files
 *.jou
 *.str
 *.wdb
 *.wdf
 .Xil/
+vivado*.log
+vivado*.backup.log
+
+# Quartus working files
+db/
+incremental_db/
+output_files/
+*.qpf.bak
+*.rpt
+
+# Yosys / nextpnr
+*.blif
+*.asc
+*.json.temp
+
+# Lattice Radiant
+impl/
+.recovery/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
@@ -26,6 +48,16 @@ Thumbs.db
 __pycache__/
 *.pyc
 *.egg-info/
+*.pyo
+.venv/
+venv/
+env/
+.env/
+dist/
+build/
+
+# Rust
+*.d
 
 # Claude Code
 .claude/worktrees/

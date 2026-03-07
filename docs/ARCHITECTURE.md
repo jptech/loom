@@ -31,16 +31,16 @@ Loom is organized into three conceptual layers:
 crates/
 ├── loom-cli/           Binary. CLI entry point (clap). Dispatches to command modules.
 ├── loom-core/          Library. All framework logic (~80% of the codebase).
-├── loom-vivado/        Library. Vivado synthesis backend.
-├── loom-quartus/       Library. Quartus Prime synthesis backend.
-├── loom-yosys/         Library. yosys + nextpnr open-source backend.
-├── loom-radiant/       Library. Lattice Radiant backend.
-├── loom-xsim/          Library. Xilinx Vivado Simulator.
-├── loom-verilator/     Library. Verilator cycle-accurate simulator.
-├── loom-icarus/        Library. Icarus Verilog simulator.
-├── loom-questa/        Library. Siemens Questa/ModelSim simulator.
-├── loom-vcs/           Library. Synopsys VCS simulator.
-└── loom-xcelium/       Library. Cadence Xcelium simulator.
+├── loom-vivado/        Library. Vivado synthesis backend. (preliminary)
+├── loom-yosys/         Library. yosys + nextpnr open-source backend. (preliminary, ice40)
+├── loom-quartus/       Library. Quartus Prime synthesis backend. (planned)
+├── loom-radiant/       Library. Lattice Radiant backend. (planned)
+├── loom-xsim/          Library. Xilinx Vivado Simulator. (preliminary)
+├── loom-verilator/     Library. Verilator cycle-accurate simulator. (preliminary)
+├── loom-icarus/        Library. Icarus Verilog simulator. (preliminary)
+├── loom-questa/        Library. Siemens Questa/ModelSim simulator. (planned)
+├── loom-vcs/           Library. Synopsys VCS simulator. (planned)
+└── loom-xcelium/       Library. Cadence Xcelium simulator. (planned)
 ```
 
 All crates share workspace-level dependencies defined in the root `Cargo.toml`. Backend and simulator crates depend only on `loom-core` (for trait definitions and shared types). The `loom-cli` crate depends on all of them.
