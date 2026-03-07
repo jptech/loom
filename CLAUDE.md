@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Loom is an FPGA build system with a Rust core and Python plugin SDK (Phase 2+). The full specification is in `system_plan.md` (~3100 lines). Detailed implementation plans are in `plans/` with phase-specific subdirectories.
+Loom is a declarative, vendor-agnostic FPGA build system with a Rust core. All 7 implementation phases are complete. The full specification is in `docs/system_plan.md` (~3100 lines).
 
 ## Build Commands
 
@@ -13,17 +13,17 @@ cargo build                    # build all crates
 cargo test                     # run all tests
 cargo test -p loom-core        # test a single crate
 cargo test test_name           # run a single test by name
-cargo clippy -- -D warnings    # lint
+cargo clippy -- -D warnings    # lint (CI enforces zero warnings)
 cargo fmt --check              # format check
 cargo fmt                      # auto-format
 ```
 
 ## Architecture
 
-Three-layer design (see `system_plan.md` §2):
+Three-layer design (see `docs/system_plan.md` §2):
 - **Layer 0:** Vendor-agnostic core — manifests, dependency resolution, build DAG, CLI
-- **Layer 1:** Tool plugins — synthesis backends (Vivado, Quartus, yosys+nextpnr)
-- **Layer 2:** Convenience abstractions — IP catalog, strategy sweeps, metrics
+- **Layer 1:** Tool plugins — synthesis backends (Vivado, Quartus, yosys+nextpnr, Radiant)
+- **Layer 2:** Convenience abstractions — IP catalog, strategy sweeps, metrics, registry
 
 ### Crate Structure
 
@@ -62,22 +62,17 @@ Full pipeline: `RESOLVE → GENERATE → ASSEMBLE → VALIDATE → BUILD → REP
 
 Manifests (`component.toml`, `project.toml`, `workspace.toml`) → dependency resolution → lockfile → code generators (DAG) → file-set assembly → backend script generation → tool execution → metrics/report.
 
-## Spec Conventions
+### Key Documentation
 
-- `§N.N` references point to sections in `system_plan.md`
-- `[Phase N]` tags indicate when a feature is implemented; untagged = Phase 1
-- Code blocks and TOML examples in the spec are the primary specification — implement to match exactly
-- If a plan in `plans/` contradicts `system_plan.md`, the spec wins
+- `docs/system_plan.md` — Full specification (~3100 lines). `§N.N` references point to sections within it.
+- `docs/ARCHITECTURE.md` — Internal architecture overview with diagrams.
+- `README.md` — User-facing docs: manifest reference, CLI commands, supported backends/simulators.
 
-## Implementation Rules
-
-### Phase Boundaries
-
-All 7 phases are implemented. The `-j` flag enables parallel test execution in `loom sim` (using `std::thread::scope` with a counting semaphore). For `loom build`, `-j` is parsed but not yet wired up.
+## Conventions
 
 ### Manifests
 
-- Component names use `org/name` format (e.g., `acmecorp/axi_async_fifo`) — enforced from day one
+- Component names use `org/name` format (e.g., `acmecorp/axi_async_fifo`)
 - Dependencies can use short name when unambiguous; lockfile always records full namespaced name
 - Constraint `constraint_scope` defaults to `"component"` (not `"global"`)
 - Forward slashes in manifest paths; convert to OS-native only when invoking tools
@@ -89,7 +84,7 @@ All 7 phases are implemented. The `-j` flag enables parallel test execution in `
 - Error messages must be actionable: "what happened, context, what to do next"
 - Validation functions return `Vec<String>` of errors (not fail-fast)
 
-### Rust Conventions
+### Rust
 
 - Edition 2021, workspace dependencies in root `Cargo.toml`
 - Serde with `#[serde(...)]` attributes for TOML deserialization
@@ -105,8 +100,6 @@ Non-project-mode batch execution. The generated Tcl must handle:
 - Absolute paths with forward slashes (even on Windows)
 - `-ref` scoping for component constraints with `constraint_scope = "component"`
 
-## Plans
+## Current Status
 
-Follow `plans/README.md` for implementation order. Within a phase, tasks are numbered and must be done in order. Each task file has "Done when" acceptance criteria — verify before moving on.
-
-All phases complete. See `plans/README.md` for the full phase breakdown.
+All 7 phases are complete. The `-j` flag enables parallel test execution in `loom sim` (using `std::thread::scope` with a counting semaphore). For `loom build`, `-j` is parsed but not yet wired up.
