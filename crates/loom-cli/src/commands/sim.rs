@@ -20,8 +20,8 @@ pub struct SimArgs {
     #[arg(short, long)]
     pub top: Option<String>,
 
-    /// Simulator to use (xsim, verilator, icarus, questa, vcs, xcelium)
-    #[arg(long, default_value = "xsim")]
+    /// Simulator to use (auto, xsim, verilator, icarus, questa, vcs, xcelium)
+    #[arg(long, default_value = "auto")]
     pub tool: String,
 
     /// Test suite to run
@@ -74,7 +74,8 @@ pub struct SimArgs {
 }
 
 pub fn run(args: SimArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
-    let simulator = get_simulator(&args.tool)?;
+    let (sim_name, simulator) = get_simulator(&args.tool)?;
+    let auto_detected = args.tool == "auto";
 
     // Determine the mode of operation.
     // Priority: check_compat > suite > regression > filter > single-test (--top) > auto
@@ -83,12 +84,12 @@ pub fn run(args: SimArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     }
 
     if args.suite.is_some() || args.regression || args.filter.is_some() {
-        return run_multi_test(args, simulator.as_ref(), ctx);
+        return run_multi_test(args, simulator.as_ref(), &sim_name, auto_detected, ctx);
     }
 
     if args.top.is_some() {
         // Explicit --top: single-test mode
-        return run_single(args, simulator.as_ref(), ctx);
+        return run_single(args, simulator.as_ref(), &sim_name, auto_detected, ctx);
     }
 
     // No flags given: auto-detect.  If there are [[tests]] in the workspace,
@@ -99,10 +100,10 @@ pub fn run(args: SimArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
             regression: true,
             ..args
         };
-        return run_multi_test(args, simulator.as_ref(), ctx);
+        return run_multi_test(args, simulator.as_ref(), &sim_name, auto_detected, ctx);
     }
 
-    run_single(args, simulator.as_ref(), ctx)
+    run_single(args, simulator.as_ref(), &sim_name, auto_detected, ctx)
 }
 
 /// Quick check whether any component in the project defines [[tests]].
@@ -152,6 +153,8 @@ fn has_test_definitions(args: &SimArgs, ctx: &GlobalContext) -> bool {
 fn run_single(
     args: SimArgs,
     simulator: &dyn SimulatorPlugin,
+    sim_name: &str,
+    auto_detected: bool,
     ctx: &GlobalContext,
 ) -> Result<(), LoomError> {
     let cwd = std::env::current_dir().map_err(|e| LoomError::Io {
@@ -197,9 +200,14 @@ fn run_single(
     };
 
     if !ctx.quiet {
+        let sim_label = if auto_detected {
+            format!("{} (auto-detected)", sim_name)
+        } else {
+            sim_name.to_string()
+        };
         ui::header(&[
             ("\u{00B7}", "sim"),
-            ("\u{00B7}", simulator.plugin_name()),
+            ("\u{00B7}", &sim_label),
             ("\u{00B7}", &format!("top: {}", top_module)),
         ]);
     }
@@ -282,6 +290,8 @@ fn run_single(
 fn run_multi_test(
     args: SimArgs,
     simulator: &dyn SimulatorPlugin,
+    sim_name: &str,
+    auto_detected: bool,
     ctx: &GlobalContext,
 ) -> Result<(), LoomError> {
     let cwd = std::env::current_dir().map_err(|e| LoomError::Io {
@@ -368,9 +378,14 @@ fn run_multi_test(
         };
 
     if !ctx.quiet {
+        let sim_label = if auto_detected {
+            format!("{} (auto-detected)", sim_name)
+        } else {
+            sim_name.to_string()
+        };
         ui::header(&[
             ("\u{00B7}", "sim"),
-            ("\u{00B7}", simulator.plugin_name()),
+            ("\u{00B7}", &sim_label),
             ("\u{00B7}", &format!("{} tests", selected.len())),
         ]);
         let suite_detail = if args.jobs > 1 {
@@ -521,22 +536,41 @@ fn run_check_compat_enhanced(
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-fn get_simulator(name: &str) -> Result<Box<dyn SimulatorPlugin>, LoomError> {
+fn get_simulator(name: &str) -> Result<(String, Box<dyn SimulatorPlugin>), LoomError> {
     match name {
-        "xsim" => Ok(Box::new(loom_xsim::XsimBackend)),
-        "verilator" => Ok(Box::new(loom_verilator::VerilatorBackend)),
-        "icarus" => Ok(Box::new(loom_icarus::IcarusBackend)),
-        "questa" => Ok(Box::new(loom_questa::QuestaBackend)),
-        "vcs" => Ok(Box::new(loom_vcs::VcsBackend)),
-        "xcelium" => Ok(Box::new(loom_xcelium::XceliumBackend)),
+        "auto" => auto_detect_simulator(),
+        "xsim" => Ok((name.to_string(), Box::new(loom_xsim::XsimBackend))),
+        "verilator" => Ok((name.to_string(), Box::new(loom_verilator::VerilatorBackend))),
+        "icarus" => Ok((name.to_string(), Box::new(loom_icarus::IcarusBackend))),
+        "questa" => Ok((name.to_string(), Box::new(loom_questa::QuestaBackend))),
+        "vcs" => Ok((name.to_string(), Box::new(loom_vcs::VcsBackend))),
+        "xcelium" => Ok((name.to_string(), Box::new(loom_xcelium::XceliumBackend))),
         _ => Err(LoomError::ToolNotFound {
             tool: name.to_string(),
             message: format!(
-                "Unknown simulator '{}'. Supported: xsim, verilator, icarus, questa, vcs, xcelium.",
+                "Unknown simulator '{}'. Supported: auto, xsim, verilator, icarus, questa, vcs, xcelium.",
                 name
             ),
         }),
     }
+}
+
+fn auto_detect_simulator() -> Result<(String, Box<dyn SimulatorPlugin>), LoomError> {
+    let probes: [(&str, Box<dyn SimulatorPlugin>); 3] = [
+        ("xsim", Box::new(loom_xsim::XsimBackend)),
+        ("verilator", Box::new(loom_verilator::VerilatorBackend)),
+        ("icarus", Box::new(loom_icarus::IcarusBackend)),
+    ];
+    for (name, sim) in probes {
+        if sim.check_environment(None).is_ok() {
+            return Ok((name.to_string(), sim));
+        }
+    }
+    Err(LoomError::ToolNotFound {
+        tool: "simulator".to_string(),
+        message: "No simulator found. Install one of: Vivado (xsim), Verilator, or Icarus Verilog."
+            .to_string(),
+    })
 }
 
 /// Find a named test suite from component manifests in the resolved project.

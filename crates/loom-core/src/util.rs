@@ -100,6 +100,54 @@ pub fn to_tool_path(path: &Path) -> String {
     s.strip_prefix("//?/").unwrap_or(&s).to_string()
 }
 
+/// Result of scanning simulation output for self-checking testbench patterns.
+#[derive(Debug, Default)]
+pub struct SimOutputScan {
+    /// Found "PASS:" or "PASS " in output
+    pub has_pass: bool,
+    /// Found "FAIL:" or "FAIL " in output
+    pub has_fail: bool,
+    /// Lines containing FAIL patterns
+    pub fail_lines: Vec<String>,
+    /// Lines containing "Error", "ERROR", or "FATAL"
+    pub error_lines: Vec<String>,
+    /// Count of warning lines
+    pub warning_count: usize,
+}
+
+/// Write combined simulation stdout+stderr to a log file.
+pub fn write_sim_log(log_path: &Path, stdout: &str, stderr: &str) {
+    let content = if stderr.is_empty() {
+        stdout.to_string()
+    } else if stdout.is_empty() {
+        stderr.to_string()
+    } else {
+        format!("{}\n{}", stdout, stderr)
+    };
+    let _ = std::fs::write(log_path, &content);
+}
+
+/// Scan simulation output for self-checking testbench patterns.
+pub fn scan_sim_output(output: &str) -> SimOutputScan {
+    let mut scan = SimOutputScan::default();
+    for line in output.lines() {
+        if line.contains("PASS:") || line.contains("PASS ") {
+            scan.has_pass = true;
+        }
+        if line.contains("FAIL:") || line.contains("FAIL ") {
+            scan.has_fail = true;
+            scan.fail_lines.push(line.to_string());
+        }
+        if line.contains("Error") || line.contains("ERROR") || line.contains("FATAL") {
+            scan.error_lines.push(line.to_string());
+        }
+        if line.contains("WARNING") || line.contains("Warning") {
+            scan.warning_count += 1;
+        }
+    }
+    scan
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,5 +210,75 @@ mod tests {
     fn test_display_path_unix() {
         let path = PathBuf::from("/home/user/loom");
         assert_eq!(display_path(&path), "/home/user/loom");
+    }
+
+    #[test]
+    fn test_scan_pass_only() {
+        let scan = scan_sim_output("PASS: all checks completed\nDone.");
+        assert!(scan.has_pass);
+        assert!(!scan.has_fail);
+        assert!(scan.fail_lines.is_empty());
+    }
+
+    #[test]
+    fn test_scan_fail_only() {
+        let scan = scan_sim_output("FAIL: mismatch at cycle 42\nFAIL: timeout");
+        assert!(!scan.has_pass);
+        assert!(scan.has_fail);
+        assert_eq!(scan.fail_lines.len(), 2);
+    }
+
+    #[test]
+    fn test_scan_both_pass_and_fail() {
+        let scan = scan_sim_output("PASS: test A\nFAIL: test B");
+        assert!(scan.has_pass);
+        assert!(scan.has_fail);
+        assert_eq!(scan.fail_lines.len(), 1);
+    }
+
+    #[test]
+    fn test_scan_neither() {
+        let scan = scan_sim_output("simulation complete\nall done");
+        assert!(!scan.has_pass);
+        assert!(!scan.has_fail);
+        assert!(scan.fail_lines.is_empty());
+        assert!(scan.error_lines.is_empty());
+    }
+
+    #[test]
+    fn test_scan_fatal_and_error_lines() {
+        let scan = scan_sim_output("FATAL: assertion failed\nERROR: bad state\nError at line 5");
+        assert_eq!(scan.error_lines.len(), 3);
+    }
+
+    #[test]
+    fn test_scan_case_sensitive() {
+        let scan = scan_sim_output("pass: lowercase\nfail: lowercase");
+        assert!(!scan.has_pass);
+        assert!(!scan.has_fail);
+    }
+
+    #[test]
+    fn test_scan_warnings() {
+        let scan = scan_sim_output("WARNING: clk glitch\nWarning: width mismatch\nall ok");
+        assert_eq!(scan.warning_count, 2);
+    }
+
+    #[test]
+    fn test_write_sim_log() {
+        let dir = std::env::temp_dir().join("loom_test_sim_log");
+        let _ = std::fs::create_dir_all(&dir);
+        let log = dir.join("test.log");
+
+        write_sim_log(&log, "stdout", "stderr");
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "stdout\nstderr");
+
+        write_sim_log(&log, "stdout only", "");
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "stdout only");
+
+        write_sim_log(&log, "", "stderr only");
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "stderr only");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

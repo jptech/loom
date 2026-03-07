@@ -29,17 +29,18 @@ module tb_fifo_basic;
 
     task automatic write_one(input logic [WIDTH-1:0] data);
         @(posedge clk);
-        wr_en   <= 1'b1;
-        wr_data <= data;
+        wr_en   = 1'b1;
+        wr_data = data;
         @(posedge clk);
-        wr_en <= 1'b0;
+        wr_en = 1'b0;
     endtask
 
     task automatic read_one(output logic [WIDTH-1:0] data);
         @(posedge clk);
-        rd_en <= 1'b1;
+        rd_en = 1'b1;
         @(posedge clk);
-        rd_en <= 1'b0;
+        rd_en = 1'b0;
+        @(posedge clk);  // wait for registered rd_data to update
         data = rd_data;
     endtask
 

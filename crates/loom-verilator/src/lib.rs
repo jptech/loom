@@ -11,7 +11,7 @@ use loom_core::plugin::simulator::{
     CompileResult, CoverageReport, ElaborateResult, SimOptions, SimReport, SimResult,
     SimulatorCapabilities, SimulatorPlugin,
 };
-use loom_core::util::{tool_arg, tool_command};
+use loom_core::util::{scan_sim_output, tool_arg, tool_command, write_sim_log};
 
 pub struct VerilatorBackend;
 
@@ -62,11 +62,14 @@ impl SimulatorPlugin for VerilatorBackend {
         let log_path = sim_dir.join("compile.log");
 
         let mut cmd = tool_command("verilator");
-        cmd.arg("--cc")
-            .arg("--exe")
-            .arg("--build")
+        cmd.arg("--binary")
+            .arg("--timing")
             .arg("-j")
             .arg("0")
+            .arg("-Wno-fatal")
+            .arg("-Wno-WIDTHTRUNC")
+            .arg("-Wno-WIDTHEXPAND")
+            .arg("--trace")
             .arg("--top-module")
             .arg(&options.top_module)
             .current_dir(&sim_dir);
@@ -94,7 +97,9 @@ impl SimulatorPlugin for VerilatorBackend {
             message: e.to_string(),
         })?;
 
+        let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
+        write_sim_log(&log_path, &stdout, &stderr);
         let errors: Vec<String> = stderr
             .lines()
             .filter(|l| l.contains("%Error"))
@@ -154,6 +159,14 @@ impl SimulatorPlugin for VerilatorBackend {
             cmd.arg(format!("+{}", plusarg));
         }
 
+        for arg in &options.extra_args {
+            if let Some((key, value)) = arg.split_once('=') {
+                cmd.env(key, value);
+            } else {
+                cmd.arg(arg);
+            }
+        }
+
         let output = cmd.output().map_err(|e| {
             LoomError::Internal(format!(
                 "Failed to run Verilator binary at {}: {}",
@@ -164,14 +177,24 @@ impl SimulatorPlugin for VerilatorBackend {
 
         let duration = start.elapsed().as_secs_f64();
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let errors: Vec<String> = stdout
-            .lines()
-            .filter(|l| l.contains("Error") || l.contains("FATAL"))
-            .map(|l| l.to_string())
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let combined = if stderr.is_empty() {
+            stdout.to_string()
+        } else {
+            format!("{}\n{}", stdout, stderr)
+        };
+        write_sim_log(&log_path, &stdout, &stderr);
+
+        let scan = scan_sim_output(&combined);
+        let success = output.status.success() && !scan.has_fail;
+        let errors: Vec<String> = scan
+            .fail_lines
+            .into_iter()
+            .chain(scan.error_lines)
             .collect();
 
         Ok(SimResult {
-            success: output.status.success(),
+            success,
             exit_code: output.status.code().unwrap_or(-1),
             log_path: log_path.to_path_buf(),
             coverage_db: if options.enable_coverage {
@@ -185,12 +208,18 @@ impl SimulatorPlugin for VerilatorBackend {
     }
 
     fn extract_results(&self, sim_result: &SimResult) -> Result<SimReport, LoomError> {
+        let warning_count = if sim_result.log_path.exists() {
+            let log = std::fs::read_to_string(&sim_result.log_path).unwrap_or_default();
+            scan_sim_output(&log).warning_count
+        } else {
+            0
+        };
         Ok(SimReport {
             test_name: "verilator_run".to_string(),
             passed: sim_result.success,
             duration_secs: sim_result.duration_secs,
             error_count: sim_result.errors.len(),
-            warning_count: 0,
+            warning_count,
             coverage: None,
         })
     }
