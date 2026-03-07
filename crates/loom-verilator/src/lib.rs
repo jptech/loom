@@ -73,9 +73,7 @@ impl SimulatorPlugin for VerilatorBackend {
             // a VPI event loop with cbAfterDelay support. Verilator's --binary
             // main doesn't have this, so we use --cc --exe with cocotb's main.
             let share_dir = loom_core::sim::compat::cocotb_share_dir().ok_or_else(|| {
-                LoomError::Internal(
-                    "cocotb-config --share failed; reinstall cocotb".to_string(),
-                )
+                LoomError::Internal("cocotb-config --share failed; reinstall cocotb".to_string())
             })?;
             let verilator_cpp = format!("{}/lib/verilator/verilator.cpp", share_dir);
             let include_dir = format!("{}/include", share_dir);
@@ -278,10 +276,7 @@ impl SimulatorPlugin for VerilatorBackend {
                     }
                 }
             }
-            if let Ok(out) = Command::new("cocotb-config")
-                .arg("--python-bin")
-                .output()
-            {
+            if let Ok(out) = Command::new("cocotb-config").arg("--python-bin").output() {
                 if out.status.success() {
                     let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
                     if !val.is_empty() {
@@ -289,10 +284,7 @@ impl SimulatorPlugin for VerilatorBackend {
                     }
                 }
             }
-            if let Ok(out) = Command::new("cocotb-config")
-                .arg("--libpython")
-                .output()
-            {
+            if let Ok(out) = Command::new("cocotb-config").arg("--libpython").output() {
                 if out.status.success() {
                     let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
                     if !val.is_empty() {
