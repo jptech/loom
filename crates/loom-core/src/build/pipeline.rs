@@ -181,7 +181,7 @@ pub fn run_pipeline(
     let mut build_context = BuildContext::new(resolved.clone(), workspace_root.clone());
     build_context.strategy = config.strategy.clone();
 
-    let gen_result = run_generate_phase(&resolved, &build_context, &get_generator_plugin, true)?;
+    let gen_result = run_generate_phase(&resolved, &build_context, &get_generator_plugin, None)?;
     for w in &gen_result.warnings {
         emit(PipelineEvent::GenerateWarning(w.clone()));
     }

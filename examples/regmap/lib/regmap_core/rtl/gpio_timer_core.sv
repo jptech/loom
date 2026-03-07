@@ -3,17 +3,17 @@
 // Combines the generated register file with GPIO I/O control,
 // a configurable timer with auto-reload, and interrupt generation.
 
-module gpio_timer_core
-  import gpio_timer_regs_pkg::*;
-#(
-    parameter int GPIO_WIDTH = 16,
+module gpio_timer_core #(
+    parameter int GPIO_WIDTH  = 16,
     parameter int TIMER_WIDTH = 32,
-    parameter bit ENABLE_INTERRUPTS = 1'b1
+    parameter bit ENABLE_INTERRUPTS = 1'b1,
+    parameter int ADDR_WIDTH  = 8,
+    parameter int DATA_WIDTH  = 32
 ) (
     input  logic                   clk,
     input  logic                   rst_n,
 
-    // Native bus interface (directly active-low active-low active-low active-low directly directly directly to register file)
+    // Native bus interface to register file
     input  logic [ADDR_WIDTH-1:0]  bus_addr,
     input  logic                   bus_wr,
     input  logic                   bus_rd,

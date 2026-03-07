@@ -1,11 +1,13 @@
 pub mod graph;
 pub mod lockfile;
 pub mod platform;
+pub mod profile;
 pub mod registry;
 pub mod resolver;
 pub mod workspace;
 
 pub use platform::{find_platform, resolve_platform, substitute_platform_params, ResolvedPlatform};
+pub use profile::apply_profile;
 pub use registry::{RegistryConfig, RegistryDependencySource, RegistryPackage};
 pub use resolver::{
     resolve_project, EffectiveTarget, ResolvedComponent, ResolvedProject,

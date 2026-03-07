@@ -44,6 +44,21 @@ pub fn build_generator_nodes(
         .collect()
 }
 
+/// Status of a single generator after execution.
+#[derive(Debug, Clone)]
+pub struct GeneratorStatus {
+    /// Generator display name.
+    pub name: String,
+    /// Source component/project.
+    pub source: String,
+    /// Whether this generator was a cache hit.
+    pub cached: bool,
+    /// Execution time in seconds (None if cached).
+    pub elapsed_secs: Option<f64>,
+    /// Number of files produced.
+    pub output_count: usize,
+}
+
 /// Result of running the generate phase.
 pub struct GeneratePhaseResult {
     /// Number of generators executed.
@@ -52,16 +67,29 @@ pub struct GeneratePhaseResult {
     pub cached: usize,
     /// Files produced by generators, to add to filesets.
     pub produced_files: Vec<(PathBuf, String, String)>, // (path, source_component, fileset)
+    /// Per-generator status for display.
+    pub generators: Vec<GeneratorStatus>,
     /// Warnings emitted.
     pub warnings: Vec<String>,
 }
 
+/// Events emitted during the generate phase for real-time UI updates.
+pub enum GenerateEvent {
+    /// A generator is about to start executing.
+    Started { name: String },
+    /// A generator finished (ran or cached).
+    Finished { status: GeneratorStatus },
+}
+
 /// Execute the generate phase: build DAG, run generators in order, return produced files.
+///
+/// If `on_event` is provided, it will be called for each generator start/finish
+/// to allow real-time UI updates (spinners, progress lines, etc.).
 pub fn run_generate_phase(
     resolved: &ResolvedProject,
     context: &BuildContext,
     get_plugin: &dyn Fn(&str) -> Option<Box<dyn GeneratorPlugin>>,
-    quiet: bool,
+    on_event: Option<&dyn Fn(GenerateEvent)>,
 ) -> Result<GeneratePhaseResult, LoomError> {
     let collected = collect_generators(resolved);
     if collected.is_empty() {
@@ -69,6 +97,7 @@ pub fn run_generate_phase(
             executed: 0,
             cached: 0,
             produced_files: vec![],
+            generators: vec![],
             warnings: vec![],
         });
     }
@@ -89,8 +118,9 @@ pub fn run_generate_phase(
     }
 
     let mut executed = 0;
-    let mut cached = 0;
+    let mut cached_count = 0;
     let mut produced_files: Vec<(PathBuf, String, String)> = Vec::new();
+    let mut generator_statuses: Vec<GeneratorStatus> = Vec::new();
 
     for node in dag.execution_order() {
         let plugin = get_plugin(&node.decl.plugin).ok_or_else(|| {
@@ -119,9 +149,7 @@ pub fn run_generate_phase(
         // Check cache
         if node.decl.cacheable && !node.decl.outputs_unknown {
             if let Some(entry) = cache.get(&cache_key)? {
-                if !quiet {
-                    eprintln!("    {} (cached)", node.id);
-                }
+                let output_count = entry.produced_files.len();
                 for file in &entry.produced_files {
                     produced_files.push((
                         file.clone(),
@@ -129,18 +157,35 @@ pub fn run_generate_phase(
                         node.decl.fileset.clone(),
                     ));
                 }
-                cached += 1;
+                let status = GeneratorStatus {
+                    name: node.decl.name.clone(),
+                    source: node.source.clone(),
+                    cached: true,
+                    elapsed_secs: None,
+                    output_count,
+                };
+                if let Some(cb) = on_event {
+                    cb(GenerateEvent::Finished {
+                        status: status.clone(),
+                    });
+                }
+                generator_statuses.push(status);
+                cached_count += 1;
                 continue;
             }
         }
 
-        if !quiet {
-            eprintln!("    Running generator: {}", node.id);
+        if let Some(cb) = on_event {
+            cb(GenerateEvent::Started {
+                name: node.decl.name.clone(),
+            });
         }
 
         // Build a config Value that includes the command and outputs for the plugin
         let exec_config = build_exec_config(node);
+        let start = std::time::Instant::now();
         let result = plugin.execute(&exec_config, context)?;
+        let elapsed = start.elapsed().as_secs_f64();
 
         // Verify declared outputs exist
         for expected in &node.resolved_outputs {
@@ -164,17 +209,33 @@ pub fn run_generate_phase(
             cache.put(&entry)?;
         }
 
+        let output_count = result.produced_files.len();
         for file in &result.produced_files {
             produced_files.push((file.clone(), node.source.clone(), node.decl.fileset.clone()));
         }
+
+        let status = GeneratorStatus {
+            name: node.decl.name.clone(),
+            source: node.source.clone(),
+            cached: false,
+            elapsed_secs: Some(elapsed),
+            output_count,
+        };
+        if let Some(cb) = on_event {
+            cb(GenerateEvent::Finished {
+                status: status.clone(),
+            });
+        }
+        generator_statuses.push(status);
 
         executed += 1;
     }
 
     Ok(GeneratePhaseResult {
         executed,
-        cached,
+        cached: cached_count,
         produced_files,
+        generators: generator_statuses,
         warnings,
     })
 }
@@ -186,6 +247,12 @@ fn build_exec_config(node: &GeneratorNode) -> toml::Value {
     if let Some(cmd) = node.decl.effective_command() {
         table.insert("command".to_string(), toml::Value::String(cmd.to_string()));
     }
+
+    // Pass component base directory so the command runs from the right place
+    table.insert(
+        "working_dir".to_string(),
+        toml::Value::String(node.base_dir.to_string_lossy().into_owned()),
+    );
 
     if !node.decl.outputs.is_empty() {
         let outputs: Vec<toml::Value> = node

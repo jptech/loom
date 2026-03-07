@@ -193,6 +193,7 @@ backend = "yosys"
             platform: None,
             active_profile: None,
             variant_selections: std::collections::HashMap::new(),
+            profile_params: std::collections::HashMap::new(),
         };
 
         let filesets = AssembledFilesets {

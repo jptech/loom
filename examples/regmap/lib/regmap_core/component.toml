@@ -4,7 +4,12 @@ version = "1.0.0"
 description = "GPIO + Timer peripheral with generated register file"
 
 [filesets.synth]
-files = ["rtl/native_bus_pkg.sv", "rtl/gpio_timer_core.sv"]
+files = [
+    "rtl/native_bus_pkg.sv",
+    "rtl/gpio_timer_core.sv",
+    "rtl/simple_regmap.sv",
+    "rtl/axilite_regmap.sv",
+]
 
 [[generators]]
 name = "regmap_gen"

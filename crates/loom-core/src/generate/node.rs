@@ -18,6 +18,8 @@ pub struct GeneratorNode {
     pub resolved_outputs: Vec<PathBuf>,
     /// Build directory for this generator's outputs.
     pub output_dir: PathBuf,
+    /// Base directory of the component/project owning this generator.
+    pub base_dir: PathBuf,
 }
 
 impl GeneratorNode {
@@ -60,6 +62,7 @@ impl GeneratorNode {
             resolved_inputs,
             resolved_outputs,
             output_dir,
+            base_dir: base_dir.to_path_buf(),
         }
     }
 

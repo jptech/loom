@@ -12,13 +12,16 @@ use loom_core::build::progress::BuildEvent;
 use loom_core::build::report::{report_path, BuildMetrics, BuildReport};
 use loom_core::build::validate_pre_build;
 use loom_core::error::LoomError;
+use loom_core::generate::execute::{merge_generated_files, run_generate_phase, GenerateEvent};
+use loom_core::generate::plugins::command::CommandGenerator;
 use loom_core::plugin::backend::BuildOptions;
+use loom_core::plugin::generator::GeneratorPlugin;
 use loom_core::resolve::lockfile::{
     check_staleness, generate_lockfile, load_lockfile, write_lockfile, LockfileStatus,
 };
 use loom_core::resolve::{
-    discover_members, find_platform, find_workspace_root, load_all_components, resolve_platform,
-    resolve_project, resolve_project_selection, WorkspaceDependencySource,
+    apply_profile, discover_members, find_platform, find_workspace_root, load_all_components,
+    resolve_platform, resolve_project, resolve_project_selection, WorkspaceDependencySource,
 };
 
 use crate::backend_registry::get_backend;
@@ -113,6 +116,13 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
         &source,
     )?;
 
+    // Apply profile overlays (must happen BEFORE platform resolution)
+    let profile_label = if let Some(ref profile_spec) = args.profile {
+        Some(apply_profile(&mut resolved, profile_spec)?)
+    } else {
+        None
+    };
+
     // Resolve platform if specified
     if let Some(ref platform_name) = resolved.project.project.platform {
         let (platform_root, platform_manifest) = find_platform(&members, platform_name)?;
@@ -134,21 +144,8 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
         },
     }
 
-    // -- ASSEMBLE --
-    let filesets = assemble_filesets(&resolved)?;
-
-    // -- VALIDATE --
-    let mut build_context = BuildContext::new(resolved.clone(), workspace_root.clone());
-    build_context.cancelled = ctx.cancelled.clone();
+    // Derive effective target early so we can print the header before generators run
     let effective_target = resolved.effective_target();
-    let backend_name = effective_target
-        .as_ref()
-        .map(|t| t.backend.as_str())
-        .unwrap_or("vivado");
-    let backend = get_backend(backend_name)?;
-    let validation = validate_pre_build(&resolved, &filesets, &build_context, backend.as_ref())?;
-
-    // Derive display strings from effective target
     let part_str = effective_target
         .as_ref()
         .map(|t| t.part.as_str())
@@ -158,7 +155,7 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
         .map(|t| t.backend.as_str())
         .unwrap_or("none");
 
-    // Print header after resolve succeeds
+    // Print header and early pipeline status
     if !ctx.quiet {
         ui::header(&[
             ("\u{00B7}", &resolved.project.project.name),
@@ -171,6 +168,104 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
             "Resolve",
             &format!("{} components", resolved.resolved_components.len()),
         );
+        if let Some(ref label) = profile_label {
+            ui::status(Icon::Dot, "Profile", label);
+        }
+    }
+
+    // -- GENERATE --
+    let pre_build_context = BuildContext::new(resolved.clone(), workspace_root.clone());
+    let get_plugin = |name: &str| -> Option<Box<dyn GeneratorPlugin>> {
+        match name {
+            "command" => Some(Box::new(CommandGenerator)),
+            _ => None,
+        }
+    };
+
+    let show_gen_progress = !ctx.quiet && !ctx.json && std::io::stderr().is_terminal();
+    let gen_spinner: Mutex<Option<ProgressBar>> = Mutex::new(None);
+
+    let gen_header_printed: Mutex<bool> = Mutex::new(false);
+
+    let gen_callback = |event: GenerateEvent| match event {
+        GenerateEvent::Started { ref name } => {
+            // Print "Generate" header on first generator event
+            if !*gen_header_printed.lock().unwrap() {
+                *gen_header_printed.lock().unwrap() = true;
+                if !ctx.quiet {
+                    ui::status(Icon::Dot, "Generate", "");
+                }
+            }
+            if show_gen_progress {
+                if let Some(sp) = gen_spinner.lock().unwrap().take() {
+                    sp.finish_and_clear();
+                }
+                let sp = ui::create_spinner(&format!(" {}", name));
+                *gen_spinner.lock().unwrap() = Some(sp);
+            }
+        }
+        GenerateEvent::Finished { ref status } => {
+            if show_gen_progress {
+                if let Some(sp) = gen_spinner.lock().unwrap().take() {
+                    sp.finish_and_clear();
+                }
+            }
+            // Print "Generate" header if this was a cache hit (no Started event)
+            if !*gen_header_printed.lock().unwrap() {
+                *gen_header_printed.lock().unwrap() = true;
+                if !ctx.quiet {
+                    ui::status(Icon::Dot, "Generate", "");
+                }
+            }
+            if !ctx.quiet {
+                let detail = if status.cached {
+                    "cached".to_string()
+                } else if let Some(secs) = status.elapsed_secs {
+                    format!(
+                        "{} file{}, {}",
+                        status.output_count,
+                        if status.output_count == 1 { "" } else { "s" },
+                        ui::format_duration(secs)
+                    )
+                } else {
+                    format!(
+                        "{} file{}",
+                        status.output_count,
+                        if status.output_count == 1 { "" } else { "s" }
+                    )
+                };
+                let icon = if status.cached {
+                    ui::DOT.dimmed().to_string()
+                } else {
+                    ui::CHECK.green().to_string()
+                };
+                eprintln!("    {} {:<14} {}", icon, status.name, detail.dimmed());
+            }
+        }
+    };
+
+    let on_event: Option<&dyn Fn(GenerateEvent)> = if !ctx.quiet {
+        Some(&gen_callback)
+    } else {
+        None
+    };
+    let gen_result = run_generate_phase(&resolved, &pre_build_context, &get_plugin, on_event)?;
+
+    // -- ASSEMBLE --
+    let mut filesets = assemble_filesets(&resolved)?;
+    merge_generated_files(&mut filesets, &gen_result.produced_files);
+
+    // -- VALIDATE --
+    let mut build_context = BuildContext::new(resolved.clone(), workspace_root.clone());
+    build_context.cancelled = ctx.cancelled.clone();
+    let backend_name = effective_target
+        .as_ref()
+        .map(|t| t.backend.as_str())
+        .unwrap_or("vivado");
+    let backend = get_backend(backend_name)?;
+    let validation = validate_pre_build(&resolved, &filesets, &build_context, backend.as_ref())?;
+
+    if !ctx.quiet {
         ui::status(
             Icon::Dot,
             "Assemble",

@@ -57,7 +57,13 @@ impl GeneratorPlugin for CommandGenerator {
                 LoomError::Internal("CommandGenerator: 'command' field is required".to_string())
             })?;
 
-        let output = execute_shell_command(command, &context.project.project_root, &context.env)?;
+        // Use working_dir from config (component base dir) if present, else project root
+        let working_dir = config
+            .get("working_dir")
+            .and_then(|v| v.as_str())
+            .map(Path::new)
+            .unwrap_or(&context.project.project_root);
+        let output = execute_shell_command(command, working_dir, &context.env)?;
 
         let success = output.status.success();
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -209,6 +215,7 @@ backend = "vivado"
             platform: None,
             active_profile: None,
             variant_selections: std::collections::HashMap::new(),
+            profile_params: std::collections::HashMap::new(),
         };
 
         let context = BuildContext::new(resolved, tmp.path().to_path_buf());
@@ -243,6 +250,7 @@ backend = "vivado"
             platform: None,
             active_profile: None,
             variant_selections: std::collections::HashMap::new(),
+            profile_params: std::collections::HashMap::new(),
         };
 
         let context = BuildContext::new(resolved, tmp.path().to_path_buf());
