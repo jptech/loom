@@ -1,6 +1,39 @@
 use crate::manifest::test::TestSimRequirements;
 use crate::plugin::simulator::{SimRequirements, SimulatorCapabilities, SimulatorPlugin};
 
+/// Check whether cocotb is installed and accessible.
+fn is_cocotb_installed() -> bool {
+    std::process::Command::new("cocotb-config")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Query cocotb's share directory (for verilator.cpp and include headers).
+pub fn cocotb_share_dir() -> Option<String> {
+    std::process::Command::new("cocotb-config")
+        .arg("--share")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Query cocotb's library directory (for VPI linking).
+pub fn cocotb_lib_dir() -> Option<String> {
+    std::process::Command::new("cocotb-config")
+        .arg("--lib-dir")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 /// Check whether a test's requirements are compatible with a simulator's capabilities.
 ///
 /// Returns a list of incompatibility reasons. An empty list means the test is compatible.
@@ -35,24 +68,29 @@ pub fn check_runner_compatibility(
         None | Some("hdl") => None,
         Some("cocotb") => {
             // Cocotb requires VPI module loading, which needs explicit backend
-            // support (passing -m to vvp, or --vpi to verilator). Currently
-            // only xsim/questa/vcs/xcelium wire this up.
-            let supported_sims = ["xsim", "questa", "vcs", "xcelium"];
+            // support (passing -m to vvp, or --vpi to verilator).
             let sim_name = simulator.plugin_name();
-            if !supported_sims.contains(&sim_name) {
-                return Some(format!(
-                    "cocotb not yet supported with {} (VPI module loading not wired up)",
-                    sim_name
-                ));
+            match sim_name {
+                "xsim" | "questa" | "vcs" | "xcelium" | "verilator" => {}
+                "icarus" => {
+                    return Some(
+                        "cocotb not yet supported with icarus (VPI module loading not wired up)"
+                            .to_string(),
+                    );
+                }
+                _ => {
+                    return Some(format!("cocotb not supported with {}", sim_name));
+                }
             }
             // Check that cocotb is installed
-            match std::process::Command::new("cocotb-config")
-                .arg("--version")
-                .output()
-            {
-                Ok(output) if output.status.success() => None,
-                _ => Some("cocotb not found (install with: pip install cocotb)".to_string()),
+            if !is_cocotb_installed() {
+                return Some("cocotb not found (install with: pip install cocotb)".to_string());
             }
+            // Cocotb on Verilator needs the cocotb VPI library
+            if sim_name == "verilator" && cocotb_lib_dir().is_none() {
+                return Some("cocotb-config --lib-dir failed; reinstall cocotb".to_string());
+            }
+            None
         }
         Some("verilator") => {
             if simulator.plugin_name() != "verilator" {

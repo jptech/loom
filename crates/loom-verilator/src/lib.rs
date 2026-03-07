@@ -61,9 +61,51 @@ impl SimulatorPlugin for VerilatorBackend {
 
         let log_path = sim_dir.join("compile.log");
 
+        let is_cocotb = options
+            .extra_args
+            .iter()
+            .any(|a| a.starts_with("COCOTB_TEST_MODULES=") || a.starts_with("COCOTB_MODULE="));
+
         let mut cmd = tool_command("verilator");
-        cmd.arg("--binary")
-            .arg("--timing")
+
+        if is_cocotb {
+            // cocotb needs its own C++ main (verilator.cpp) that implements
+            // a VPI event loop with cbAfterDelay support. Verilator's --binary
+            // main doesn't have this, so we use --cc --exe with cocotb's main.
+            let share_dir = loom_core::sim::compat::cocotb_share_dir().ok_or_else(|| {
+                LoomError::Internal(
+                    "cocotb-config --share failed; reinstall cocotb".to_string(),
+                )
+            })?;
+            let verilator_cpp = format!("{}/lib/verilator/verilator.cpp", share_dir);
+            let include_dir = format!("{}/include", share_dir);
+
+            cmd.arg("--cc")
+                .arg("--exe")
+                .arg("--vpi")
+                .arg("--public-flat-rw")
+                .arg("--prefix")
+                .arg("Vtop");
+
+            // cocotb's verilator.cpp is the main entry point
+            cmd.arg(&verilator_cpp);
+            cmd.arg("-CFLAGS").arg(format!("-I{}", include_dir));
+
+            // Link the cocotb VPI library. --no-as-needed ensures the linker
+            // keeps it even though no symbols are directly referenced (VPI
+            // registers via constructor attributes).
+            if let Some(lib_dir) = loom_core::sim::compat::cocotb_lib_dir() {
+                cmd.arg("-LDFLAGS").arg(format!(
+                    "-Wl,-rpath,{lib_dir} -L{lib_dir} -Wl,--no-as-needed -lcocotbvpi_verilator"
+                ));
+            }
+
+            cmd.arg("+define+COCOTB_SIM=1");
+        } else {
+            cmd.arg("--binary");
+        }
+
+        cmd.arg("--timing")
             .arg("-j")
             .arg("0")
             .arg("-Wno-fatal")
@@ -85,6 +127,10 @@ impl SimulatorPlugin for VerilatorBackend {
             tool_arg(&mut cmd, &format!("+define+{}", define));
         }
 
+        // Output binary name — cocotb uses --prefix Vtop so the makefile is Vtop.mk
+        let binary_name = format!("V{}", options.top_module);
+        cmd.arg("-o").arg(&binary_name);
+
         // Add source files (Verilog/SV only, no VHDL) — include sim files for testbenches
         for file in filesets.synth_files.iter().chain(filesets.sim_files.iter()) {
             if matches!(
@@ -102,7 +148,48 @@ impl SimulatorPlugin for VerilatorBackend {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        write_sim_log(&log_path, &stdout, &stderr);
+
+        // For cocotb (--cc --exe), verilator only generates C++ and a Makefile.
+        // We need to run make to actually build the binary.
+        if is_cocotb && output.status.success() {
+            let mk_name = "Vtop.mk";
+            let make_out = Command::new("make")
+                .arg("-C")
+                .arg(sim_dir.join("obj_dir"))
+                .arg("-f")
+                .arg(mk_name)
+                .arg("-j")
+                .output()
+                .map_err(|e| LoomError::ToolNotFound {
+                    tool: "make".to_string(),
+                    message: e.to_string(),
+                })?;
+
+            let make_stdout = String::from_utf8_lossy(&make_out.stdout);
+            let make_stderr = String::from_utf8_lossy(&make_out.stderr);
+
+            // Append make output to the log
+            let combined_stdout = format!("{}\n{}", stdout, make_stdout);
+            let combined_stderr = format!("{}\n{}", stderr, make_stderr);
+            write_sim_log(&log_path, &combined_stdout, &combined_stderr);
+
+            if !make_out.status.success() {
+                let errors: Vec<String> = make_stderr
+                    .lines()
+                    .filter(|l| l.contains("error:") || l.contains("Error"))
+                    .map(|l| l.to_string())
+                    .collect();
+                return Ok(CompileResult {
+                    success: false,
+                    log_path,
+                    work_dir: sim_dir,
+                    errors,
+                    warnings: vec![],
+                });
+            }
+        } else {
+            write_sim_log(&log_path, &stdout, &stderr);
+        }
         let errors: Vec<String> = stderr
             .lines()
             .filter(|l| l.contains("%Error"))
@@ -155,6 +242,11 @@ impl SimulatorPlugin for VerilatorBackend {
 
         let start = std::time::Instant::now();
 
+        let is_cocotb = options
+            .extra_args
+            .iter()
+            .any(|a| a.starts_with("COCOTB_TEST_MODULES=") || a.starts_with("COCOTB_MODULE="));
+
         let mut cmd = Command::new(&binary);
         cmd.current_dir(sim_dir);
 
@@ -167,6 +259,49 @@ impl SimulatorPlugin for VerilatorBackend {
                 cmd.env(key, value);
             } else {
                 cmd.arg(arg);
+            }
+        }
+
+        // cocotb needs several environment variables for VPI initialization
+        if is_cocotb {
+            cmd.env("TOPLEVEL_LANG", "verilog");
+
+            // GPI_USERS: tells the VPI library where to find the cocotb GPI entry point
+            if let Ok(out) = Command::new("cocotb-config")
+                .arg("--pygpi-entry-point")
+                .output()
+            {
+                if out.status.success() {
+                    let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if !val.is_empty() {
+                        cmd.env("GPI_USERS", &val);
+                    }
+                }
+            }
+            if let Ok(out) = Command::new("cocotb-config")
+                .arg("--python-bin")
+                .output()
+            {
+                if out.status.success() {
+                    let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if !val.is_empty() {
+                        cmd.env("PYGPI_PYTHON_BIN", &val);
+                    }
+                }
+            }
+            if let Ok(out) = Command::new("cocotb-config")
+                .arg("--libpython")
+                .output()
+            {
+                if out.status.success() {
+                    let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if !val.is_empty() {
+                        cmd.env("LIBPYTHON_LOC", &val);
+                    }
+                }
+            }
+            if let Some(lib_dir) = loom_core::sim::compat::cocotb_lib_dir() {
+                cmd.env("LD_LIBRARY_PATH", &lib_dir);
             }
         }
 

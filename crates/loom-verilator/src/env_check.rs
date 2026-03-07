@@ -86,7 +86,27 @@ fn query_version() -> Result<String, String> {
     parse_verilator_version(&stdout).ok_or_else(|| "Could not parse version".to_string())
 }
 
-fn parse_verilator_version(output: &str) -> Option<String> {
+/// Minimum Verilator version for cocotb VPI support.
+pub const MIN_COCOTB_VERSION: &str = "5.036";
+
+/// Query the installed Verilator version string (e.g. "5.047").
+/// Returns None if verilator is not installed or version can't be parsed.
+pub fn installed_version() -> Option<String> {
+    query_version().ok()
+}
+
+/// Check whether the version string `ver` meets the cocotb minimum (5.036+).
+pub fn meets_cocotb_minimum(ver: &str) -> bool {
+    parse_version_number(ver)
+        .map(|v| v >= parse_version_number(MIN_COCOTB_VERSION).unwrap_or(5.036))
+        .unwrap_or(false)
+}
+
+fn parse_version_number(ver: &str) -> Option<f64> {
+    ver.parse::<f64>().ok()
+}
+
+pub fn parse_verilator_version(output: &str) -> Option<String> {
     for line in output.lines() {
         if line.starts_with("Verilator") {
             return line.split_whitespace().nth(1).map(|s| s.to_string());
