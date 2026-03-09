@@ -81,6 +81,18 @@ impl GeneratorPlugin for PythonGenerator {
         &self.name
     }
 
+    fn check_environment(&self) -> Result<Vec<Diagnostic>, LoomError> {
+        match find_python() {
+            Ok(_) => Ok(vec![]),
+            Err(_) => Ok(vec![Diagnostic {
+                severity: crate::plugin::backend::DiagnosticSeverity::Error,
+                message: "Python not found. Install Python 3 and ensure 'python3' or 'python' is on PATH.".to_string(),
+                source_path: None,
+                line: None,
+            }]),
+        }
+    }
+
     fn validate_config(&self, config: &toml::Value) -> Result<Vec<Diagnostic>, LoomError> {
         let result = self.run_action("validate", config, None, &[])?;
         // Parse diagnostics from JSON array

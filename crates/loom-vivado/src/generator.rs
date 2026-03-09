@@ -19,6 +19,23 @@ impl GeneratorPlugin for VivadoIpGenerator {
         "vivado_ip"
     }
 
+    fn check_environment(&self) -> Result<Vec<Diagnostic>, LoomError> {
+        match std::process::Command::new("vivado")
+            .arg("-version")
+            .output()
+        {
+            Ok(output) if output.status.success() => Ok(vec![]),
+            _ => Ok(vec![Diagnostic {
+                severity: loom_core::plugin::backend::DiagnosticSeverity::Error,
+                message: "Vivado not found on PATH. Install Vivado and source settings64.sh, \
+                     or set XILINX_VIVADO environment variable."
+                    .to_string(),
+                source_path: None,
+                line: None,
+            }]),
+        }
+    }
+
     fn validate_config(&self, config: &toml::Value) -> Result<Vec<Diagnostic>, LoomError> {
         let mut diagnostics = Vec::new();
 

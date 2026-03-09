@@ -6,11 +6,23 @@ use crate::error::LoomError;
 use crate::plugin::backend::Diagnostic;
 
 /// A generator produces derived files from inputs.
-/// Phase 1: interface defined but no generators are used.
 pub trait GeneratorPlugin: Send + Sync {
     fn plugin_name(&self) -> &str;
 
+    /// Validate generator configuration before execution.
+    ///
+    /// Called during the pre-flight check phase, before any generator runs.
+    /// Return diagnostics for any config problems (missing fields, invalid formats).
     fn validate_config(&self, config: &toml::Value) -> Result<Vec<Diagnostic>, LoomError>;
+
+    /// Check that required external tools are available.
+    ///
+    /// Called during the pre-flight check phase so that missing tools are
+    /// reported before any generator executes. The default implementation
+    /// returns no diagnostics (suitable for plugins with no external deps).
+    fn check_environment(&self) -> Result<Vec<Diagnostic>, LoomError> {
+        Ok(vec![])
+    }
 
     fn compute_cache_key(
         &self,

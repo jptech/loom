@@ -18,6 +18,23 @@ impl GeneratorPlugin for QuartusIpGenerator {
         "quartus_ip"
     }
 
+    fn check_environment(&self) -> Result<Vec<Diagnostic>, LoomError> {
+        match std::process::Command::new("qsys-generate")
+            .arg("--version")
+            .output()
+        {
+            Ok(output) if output.status.success() => Ok(vec![]),
+            _ => Ok(vec![Diagnostic {
+                severity: loom_core::plugin::backend::DiagnosticSeverity::Error,
+                message:
+                    "Quartus tools not found on PATH. Install Intel Quartus Prime and add to PATH."
+                        .to_string(),
+                source_path: None,
+                line: None,
+            }]),
+        }
+    }
+
     fn validate_config(&self, config: &toml::Value) -> Result<Vec<Diagnostic>, LoomError> {
         let mut diagnostics = Vec::new();
 
