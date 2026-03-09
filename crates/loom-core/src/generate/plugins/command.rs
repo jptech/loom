@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use sha2::{Digest, Sha256};
@@ -63,7 +63,26 @@ impl GeneratorPlugin for CommandGenerator {
             .and_then(|v| v.as_str())
             .map(Path::new)
             .unwrap_or(&context.project.project_root);
-        let output = execute_shell_command(command, working_dir, &context.env)?;
+
+        // Build environment with generator-specific variables
+        let mut env = context.env.clone();
+        if let Some(output_dir) = config.get("output_dir").and_then(|v| v.as_str()) {
+            env.insert("LOOM_OUTPUT_DIR".to_string(), output_dir.to_string());
+        }
+        env.insert(
+            "LOOM_COMPONENT_DIR".to_string(),
+            working_dir.to_string_lossy().into_owned(),
+        );
+        env.insert(
+            "LOOM_BUILD_DIR".to_string(),
+            context.build_dir.to_string_lossy().into_owned(),
+        );
+        env.insert(
+            "LOOM_PROJECT_ROOT".to_string(),
+            context.project.project_root.to_string_lossy().into_owned(),
+        );
+
+        let output = execute_shell_command(command, working_dir, &env)?;
 
         let success = output.status.success();
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -85,13 +104,14 @@ impl GeneratorPlugin for CommandGenerator {
             )));
         }
 
+        // Outputs are already absolute paths (resolved in node.rs against output_dir)
         let produced_files = if let Some(outputs) = config.get("outputs") {
             outputs
                 .as_array()
                 .map(|arr| {
                     arr.iter()
                         .filter_map(|v| v.as_str())
-                        .map(|s| context.project.project_root.join(s))
+                        .map(PathBuf::from)
                         .collect()
                 })
                 .unwrap_or_default()
@@ -106,11 +126,12 @@ impl GeneratorPlugin for CommandGenerator {
         })
     }
 
-    fn clean(&self, config: &toml::Value, context: &BuildContext) -> Result<(), LoomError> {
+    fn clean(&self, config: &toml::Value, _context: &BuildContext) -> Result<(), LoomError> {
+        // Outputs are absolute paths (resolved in node.rs)
         if let Some(outputs) = config.get("outputs").and_then(|v| v.as_array()) {
             for output in outputs {
                 if let Some(path_str) = output.as_str() {
-                    let path = context.project.project_root.join(path_str);
+                    let path = PathBuf::from(path_str);
                     if path.exists() {
                         std::fs::remove_file(&path)
                             .map_err(|e| LoomError::Io { path, source: e })?;
@@ -223,6 +244,123 @@ backend = "vivado"
         let config: toml::Value = toml::from_str("command = \"echo hello\"").unwrap();
         let result = gen.execute(&config, &context).unwrap();
         assert!(result.success);
+    }
+
+    #[test]
+    fn test_command_generator_env_vars() {
+        // Verify that LOOM_OUTPUT_DIR, LOOM_COMPONENT_DIR, etc. are set
+        let gen = CommandGenerator;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project_manifest: crate::manifest::ProjectManifest = toml::from_str(
+            r#"
+[project]
+name = "test"
+top_module = "top"
+[target]
+part = "xc7a35t"
+backend = "vivado"
+"#,
+        )
+        .unwrap();
+
+        let resolved = crate::resolve::resolver::ResolvedProject {
+            project: project_manifest,
+            project_root: tmp.path().to_path_buf(),
+            workspace_root: tmp.path().to_path_buf(),
+            resolved_components: vec![],
+            platform: None,
+            active_profile: None,
+            variant_selections: std::collections::HashMap::new(),
+            profile_params: std::collections::HashMap::new(),
+        };
+
+        let context = BuildContext::new(resolved, tmp.path().to_path_buf());
+
+        // Use a command that prints the env vars
+        let print_cmd = if cfg!(target_os = "windows") {
+            "echo %LOOM_OUTPUT_DIR%"
+        } else {
+            "echo $LOOM_OUTPUT_DIR:$LOOM_COMPONENT_DIR:$LOOM_PROJECT_ROOT"
+        };
+
+        let mut config_table = toml::map::Map::new();
+        config_table.insert(
+            "command".to_string(),
+            toml::Value::String(print_cmd.to_string()),
+        );
+        config_table.insert(
+            "output_dir".to_string(),
+            toml::Value::String("/test/output/dir".to_string()),
+        );
+        config_table.insert(
+            "working_dir".to_string(),
+            toml::Value::String(tmp.path().to_string_lossy().into_owned()),
+        );
+        let config = toml::Value::Table(config_table);
+
+        let result = gen.execute(&config, &context).unwrap();
+        assert!(result.success);
+
+        if !cfg!(target_os = "windows") {
+            // Check stdout contains the output dir we set
+            let stdout = result.log.join("\n");
+            assert!(
+                stdout.contains("/test/output/dir"),
+                "LOOM_OUTPUT_DIR not found in output: {}",
+                stdout
+            );
+        }
+    }
+
+    #[test]
+    fn test_command_generator_absolute_output_paths() {
+        // Verify that outputs in config are used as absolute paths
+        let gen = CommandGenerator;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let out_file = tmp.path().join("generated.sv");
+        std::fs::write(&out_file, "// generated").unwrap();
+
+        let project_manifest: crate::manifest::ProjectManifest = toml::from_str(
+            r#"
+[project]
+name = "test"
+top_module = "top"
+[target]
+part = "xc7a35t"
+backend = "vivado"
+"#,
+        )
+        .unwrap();
+
+        let resolved = crate::resolve::resolver::ResolvedProject {
+            project: project_manifest,
+            project_root: tmp.path().to_path_buf(),
+            workspace_root: tmp.path().to_path_buf(),
+            resolved_components: vec![],
+            platform: None,
+            active_profile: None,
+            variant_selections: std::collections::HashMap::new(),
+            profile_params: std::collections::HashMap::new(),
+        };
+
+        let context = BuildContext::new(resolved, tmp.path().to_path_buf());
+
+        let mut config_table = toml::map::Map::new();
+        config_table.insert(
+            "command".to_string(),
+            toml::Value::String("echo ok".to_string()),
+        );
+        config_table.insert(
+            "outputs".to_string(),
+            toml::Value::Array(vec![toml::Value::String(
+                out_file.to_string_lossy().into_owned(),
+            )]),
+        );
+        let config = toml::Value::Table(config_table);
+
+        let result = gen.execute(&config, &context).unwrap();
+        // The produced file path should be the absolute path, not joined to project_root
+        assert_eq!(result.produced_files[0], out_file);
     }
 
     #[test]

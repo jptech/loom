@@ -8,9 +8,8 @@ use crate::build::report::{report_path, BuildMetrics, BuildReport};
 use crate::build::validate_pre_build;
 use crate::error::LoomError;
 use crate::generate::execute::{merge_generated_files, run_generate_phase};
-use crate::generate::plugins::command::CommandGenerator;
+use crate::generate::registry::PluginRegistry;
 use crate::plugin::backend::{BackendPlugin, BuildOptions, BuildResult, Diagnostic};
-use crate::plugin::generator::GeneratorPlugin;
 use crate::resolve::lockfile::{
     check_staleness, generate_lockfile, load_lockfile, write_lockfile, LockfileStatus,
 };
@@ -181,7 +180,8 @@ pub fn run_pipeline(
     let mut build_context = BuildContext::new(resolved.clone(), workspace_root.clone());
     build_context.strategy = config.strategy.clone();
 
-    let gen_result = run_generate_phase(&resolved, &build_context, &get_generator_plugin, None)?;
+    let registry = PluginRegistry::with_builtins();
+    let gen_result = run_generate_phase(&resolved, &build_context, &registry, None)?;
     for w in &gen_result.warnings {
         emit(PipelineEvent::GenerateWarning(w.clone()));
     }
@@ -397,18 +397,6 @@ pub fn run_pipeline(
         build_state: state,
         build_result,
     })
-}
-
-/// Built-in generator plugin resolver.
-///
-/// Resolves built-in generator plugins by name. The "python" plugin requires
-/// per-instance configuration (script path) and is resolved by the generator
-/// execution engine from the declaration's config, not here.
-fn get_generator_plugin(name: &str) -> Option<Box<dyn GeneratorPlugin>> {
-    match name {
-        "command" => Some(Box::new(CommandGenerator)),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

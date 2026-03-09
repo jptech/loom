@@ -13,9 +13,8 @@ use loom_core::build::report::{report_path, BuildMetrics, BuildReport};
 use loom_core::build::validate_pre_build;
 use loom_core::error::LoomError;
 use loom_core::generate::execute::{merge_generated_files, run_generate_phase, GenerateEvent};
-use loom_core::generate::plugins::command::CommandGenerator;
+use loom_core::generate::registry::PluginRegistry;
 use loom_core::plugin::backend::BuildOptions;
-use loom_core::plugin::generator::GeneratorPlugin;
 use loom_core::resolve::lockfile::{
     check_staleness, generate_lockfile, load_lockfile, write_lockfile, LockfileStatus,
 };
@@ -175,12 +174,14 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
 
     // -- GENERATE --
     let pre_build_context = BuildContext::new(resolved.clone(), workspace_root.clone());
-    let get_plugin = |name: &str| -> Option<Box<dyn GeneratorPlugin>> {
-        match name {
-            "command" => Some(Box::new(CommandGenerator)),
-            _ => None,
-        }
-    };
+    let mut registry = PluginRegistry::with_builtins();
+    // Register vendor-specific generator plugins
+    registry.register("vivado_ip", |_decl| {
+        Ok(Box::new(loom_vivado::generator::VivadoIpGenerator))
+    });
+    registry.register("quartus_ip", |_decl| {
+        Ok(Box::new(loom_quartus::generator::QuartusIpGenerator))
+    });
 
     let show_gen_progress = !ctx.quiet && !ctx.json && std::io::stderr().is_terminal();
     let gen_spinner: Mutex<Option<ProgressBar>> = Mutex::new(None);
@@ -249,7 +250,7 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     } else {
         None
     };
-    let gen_result = run_generate_phase(&resolved, &pre_build_context, &get_plugin, on_event)?;
+    let gen_result = run_generate_phase(&resolved, &pre_build_context, &registry, on_event)?;
 
     // -- ASSEMBLE --
     let mut filesets = assemble_filesets(&resolved)?;

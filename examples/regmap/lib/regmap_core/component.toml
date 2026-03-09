@@ -11,12 +11,15 @@ files = [
     "rtl/axilite_regmap.sv",
 ]
 
+[filesets.sim]
+files = ["tb/tb_gpio_timer.sv"]
+
 [[generators]]
 name = "regmap_gen"
 plugin = "command"
-command = "python3 scripts/gen_regmap.py spec/gpio_timer_regs.json generated/"
+command = "python3 scripts/gen_regmap.py spec/gpio_timer_regs.json $LOOM_OUTPUT_DIR/"
 inputs = ["spec/gpio_timer_regs.json", "scripts/gen_regmap.py"]
-outputs = ["generated/gpio_timer_regs.sv", "generated/gpio_timer_regs_pkg.sv"]
+outputs = ["gpio_timer_regs.sv", "gpio_timer_regs_pkg.sv"]
 fileset = "synth"
 
 [variants.axilite]

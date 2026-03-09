@@ -1,5 +1,6 @@
 pub mod env_check;
 pub mod executor;
+pub mod generator;
 pub mod ooc;
 pub mod tcl_gen;
 

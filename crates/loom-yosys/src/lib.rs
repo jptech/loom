@@ -121,9 +121,9 @@ impl BackendPlugin for YosysNextpnrBackend {
         filesets: &AssembledFilesets,
         context: &BuildContext,
     ) -> Result<Vec<PathBuf>, LoomError> {
-        let effective = project
-            .effective_target()
-            .ok_or_else(|| LoomError::Internal("Project has no target or platform with part".to_string()))?;
+        let effective = project.effective_target().ok_or_else(|| {
+            LoomError::Internal("Project has no target or platform with part".to_string())
+        })?;
 
         let arch = YosysArchitecture::from_part(&effective.part).ok_or_else(|| {
             LoomError::Internal(format!(
@@ -149,9 +149,9 @@ impl BackendPlugin for YosysNextpnrBackend {
         }
 
         let project = &context.project;
-        let effective = project
-            .effective_target()
-            .ok_or_else(|| LoomError::Internal("Project has no target or platform with part".to_string()))?;
+        let effective = project.effective_target().ok_or_else(|| {
+            LoomError::Internal("Project has no target or platform with part".to_string())
+        })?;
 
         let arch = YosysArchitecture::from_part(&effective.part).ok_or_else(|| {
             LoomError::Internal(format!("Unknown arch for part '{}'", effective.part))

@@ -49,7 +49,10 @@ impl ResolvedProject {
             if let Some(ref part) = platform.part {
                 return Some(EffectiveTarget {
                     part: part.clone(),
-                    backend: platform.backend.clone().unwrap_or_else(|| "vivado".to_string()),
+                    backend: platform
+                        .backend
+                        .clone()
+                        .unwrap_or_else(|| "vivado".to_string()),
                     version: platform.backend_version.clone(),
                 });
             }

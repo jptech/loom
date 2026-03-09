@@ -6,6 +6,7 @@
 
 pub mod env_check;
 pub mod executor;
+pub mod generator;
 pub mod tcl_gen;
 
 use std::path::PathBuf;

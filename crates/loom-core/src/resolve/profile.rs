@@ -62,14 +62,13 @@ fn resolve_profile_overlays<'a>(
             let mut label_parts = Vec::new();
 
             for (dim_name, choice_name) in selections {
-                let dimension =
-                    manifest.profile_dimensions.get(dim_name).ok_or_else(|| {
-                        let available: Vec<_> = manifest.profile_dimensions.keys().collect();
-                        LoomError::Internal(format!(
-                            "Profile dimension '{}' not found. Available dimensions: {:?}",
-                            dim_name, available
-                        ))
-                    })?;
+                let dimension = manifest.profile_dimensions.get(dim_name).ok_or_else(|| {
+                    let available: Vec<_> = manifest.profile_dimensions.keys().collect();
+                    LoomError::Internal(format!(
+                        "Profile dimension '{}' not found. Available dimensions: {:?}",
+                        dim_name, available
+                    ))
+                })?;
 
                 let overlay = dimension.choices.get(choice_name).ok_or_else(|| {
                     let available: Vec<_> = dimension.choices.keys().collect();

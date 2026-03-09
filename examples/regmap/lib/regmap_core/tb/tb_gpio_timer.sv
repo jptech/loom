@@ -1,12 +1,22 @@
-// tb_gpio_timer.sv — Basic testbench for GPIO+Timer peripheral
+// tb_gpio_timer_top.sv — Basic testbench for GPIO+Timer peripheral
 //
 // Uses the simple bus wrapper for direct register read/write testing.
 
 `timescale 1ns / 1ps
 
-module tb_gpio_timer;
+module tb_gpio_timer_top;
 
-    import gpio_timer_regs_pkg::*;
+    // Address constants (match generated register file)
+    localparam logic [7:0] ADDR_GPIO_DIR      = 8'h00;
+    localparam logic [7:0] ADDR_GPIO_OUT      = 8'h04;
+    localparam logic [7:0] ADDR_GPIO_IN       = 8'h08;
+    localparam logic [7:0] ADDR_IRQ_ENABLE    = 8'h0C;
+    localparam logic [7:0] ADDR_IRQ_STATUS    = 8'h10;
+    localparam logic [7:0] ADDR_IRQ_CLEAR     = 8'h14;
+    localparam logic [7:0] ADDR_TIMER_CTRL    = 8'h18;
+    localparam logic [7:0] ADDR_TIMER_COUNT   = 8'h1C;
+    localparam logic [7:0] ADDR_TIMER_COMPARE = 8'h20;
+    localparam logic [7:0] ADDR_ID            = 8'h24;
 
     logic        clk = 0;
     logic        rst_n;
@@ -110,7 +120,7 @@ module tb_gpio_timer;
             bus_write(ADDR_IRQ_CLEAR, 32'h0000_0001);
         end
 
-        $display("All basic tests passed");
+        $display("PASS: all basic tests passed");
         $finish;
     end
 
