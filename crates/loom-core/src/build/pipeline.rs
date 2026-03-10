@@ -173,6 +173,38 @@ pub fn run_pipeline(
         elapsed_secs: resolve_start.elapsed().as_secs_f64(),
     });
 
+    // ── EARLY ENVIRONMENT CHECK ──────────────────────────────────────
+    // Fail fast: verify the backend tool is available before running
+    // generators or assembling files. This avoids wasting time on
+    // code generation only to discover the synthesis tool is missing.
+    match backend.check_environment(
+        resolved
+            .effective_target()
+            .as_ref()
+            .and_then(|t| t.version.as_deref()),
+    ) {
+        Ok(env_status) if !env_status.is_ok() => {
+            let mut reasons = Vec::new();
+            if !env_status.version_matches {
+                if let Some(required) = &env_status.required_version {
+                    reasons.push(format!(
+                        "Version mismatch: required {}, found {}",
+                        required, env_status.version
+                    ));
+                }
+            }
+            if !env_status.license_ok {
+                reasons.push("License check failed".to_string());
+            }
+            return Err(LoomError::ToolNotFound {
+                tool: env_status.tool_name,
+                message: reasons.join("; "),
+            });
+        }
+        Err(e) => return Err(e),
+        Ok(_) => {} // Tool is available, continue
+    }
+
     // ── GENERATE ─────────────────────────────────────────────────────
     let generate_start = std::time::Instant::now();
     emit(PipelineEvent::PhaseStarted("generate".to_string()));

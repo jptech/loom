@@ -172,6 +172,46 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
         }
     }
 
+    // -- EARLY ENVIRONMENT CHECK --
+    // Resolve the backend and verify the tool is available before running generators.
+    // This avoids wasting time on code generation only to discover the synthesis tool is missing.
+    let backend = get_backend(backend_str)?;
+    match backend.check_environment(effective_target.as_ref().and_then(|t| t.version.as_deref())) {
+        Ok(env_status) if !env_status.is_ok() => {
+            if !ctx.quiet {
+                ui::status(Icon::Cross, "Environment", "");
+                if !env_status.version_matches {
+                    if let Some(required) = &env_status.required_version {
+                        ui::sub_item(
+                            &format!(
+                                "{}: version mismatch (required {}, found {})",
+                                env_status.tool_name, required, env_status.version
+                            ),
+                            false,
+                        );
+                    }
+                }
+                if !env_status.license_ok {
+                    ui::sub_item(
+                        &format!("{}: license check failed", env_status.tool_name),
+                        false,
+                    );
+                }
+            }
+            return Err(LoomError::ToolNotFound {
+                tool: env_status.tool_name,
+                message: "Backend tool environment check failed. See errors above.".to_string(),
+            });
+        }
+        Err(e) => {
+            if !ctx.quiet {
+                ui::status(Icon::Cross, "Environment", &format!("{}", e));
+            }
+            return Err(e);
+        }
+        Ok(_) => {} // Tool is available
+    }
+
     // -- GENERATE --
     let pre_build_context = BuildContext::new(resolved.clone(), workspace_root.clone());
     let mut registry = PluginRegistry::with_builtins();
@@ -263,7 +303,7 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
         .as_ref()
         .map(|t| t.backend.as_str())
         .unwrap_or("vivado");
-    let backend = get_backend(backend_name)?;
+    // backend was already resolved in the early environment check above
     let validation = validate_pre_build(&resolved, &filesets, &build_context, backend.as_ref())?;
 
     if !ctx.quiet {
