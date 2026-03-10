@@ -39,8 +39,9 @@ impl GeneratorPlugin for VivadoIpGenerator {
     fn validate_config(&self, config: &toml::Value) -> Result<Vec<Diagnostic>, LoomError> {
         let mut diagnostics = Vec::new();
 
-        let vlnv = config.get("vlnv").and_then(|v| v.as_str());
-        if vlnv.is_none() {
+        let vlnv_str = if let Some(s) = config.get("vlnv").and_then(|v| v.as_str()) {
+            s
+        } else {
             diagnostics.push(Diagnostic {
                 severity: loom_core::plugin::backend::DiagnosticSeverity::Error,
                 message:
@@ -50,10 +51,9 @@ impl GeneratorPlugin for VivadoIpGenerator {
                 line: None,
             });
             return Ok(diagnostics);
-        }
+        };
 
         // Validate VLNV format: vendor:library:name or vendor:library:name:version
-        let vlnv_str = vlnv.unwrap();
         let parts: Vec<&str> = vlnv_str.split(':').collect();
         if parts.len() < 3 || parts.len() > 4 {
             diagnostics.push(Diagnostic {
