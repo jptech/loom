@@ -103,7 +103,15 @@ pub struct ResolvedContext {
     pub constraint_file_count: usize,
 }
 
-/// Execute the full build pipeline: RESOLVE → GENERATE → ASSEMBLE → VALIDATE → BUILD → REPORT.
+/// Execute the full build pipeline:
+///
+/// ```text
+/// RESOLVE → ENV CHECK → GENERATE → ASSEMBLE → VALIDATE → BUILD → REPORT
+/// ```
+///
+/// The backend tool environment is verified immediately after RESOLVE (before
+/// generators run) to fail fast. Generator pre-flight validation (config,
+/// tool availability, input files) happens at the start of the GENERATE phase.
 ///
 /// The `backend` must be provided by the caller (since backend crates are not dependencies
 /// of loom-core). The `progress` callback receives pipeline events for UI rendering.
@@ -442,5 +450,73 @@ mod tests {
         assert!(!config.dry_run);
         assert!(!config.resume);
         assert!(config.project_name.is_none());
+    }
+
+    #[test]
+    fn test_pipeline_fails_fast_on_missing_backend_tool() {
+        use crate::assemble::fileset::AssembledFilesets;
+        use crate::plugin::backend::{BuildResult, EnvironmentStatus};
+
+        struct FailingBackend;
+
+        impl BackendPlugin for FailingBackend {
+            fn plugin_name(&self) -> &str {
+                "failing"
+            }
+
+            fn check_environment(
+                &self,
+                _req: Option<&str>,
+            ) -> Result<EnvironmentStatus, LoomError> {
+                Err(LoomError::ToolNotFound {
+                    tool: "failing_tool".to_string(),
+                    message: "Tool not installed".to_string(),
+                })
+            }
+
+            fn validate(
+                &self,
+                _p: &crate::resolve::resolver::ResolvedProject,
+                _f: &AssembledFilesets,
+                _c: &BuildContext,
+            ) -> Result<Vec<Diagnostic>, LoomError> {
+                panic!("validate should not be called when env check fails");
+            }
+
+            fn generate_build_scripts(
+                &self,
+                _p: &crate::resolve::resolver::ResolvedProject,
+                _f: &AssembledFilesets,
+                _c: &BuildContext,
+            ) -> Result<Vec<PathBuf>, LoomError> {
+                panic!("generate_build_scripts should not be called");
+            }
+
+            fn execute_build(
+                &self,
+                _s: &[PathBuf],
+                _c: &BuildContext,
+                _progress: Option<&(dyn Fn(crate::build::progress::BuildEvent) + Send + Sync)>,
+            ) -> Result<BuildResult, LoomError> {
+                panic!("execute_build should not be called");
+            }
+        }
+
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/simple_project");
+
+        let config = PipelineConfig::default();
+        let result = run_pipeline(&config, &FailingBackend, &fixture, None);
+
+        assert!(result.is_err(), "Pipeline should fail on missing tool");
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => unreachable!(),
+        };
+        assert!(
+            err.to_string().contains("failing_tool"),
+            "Error should mention the missing tool: {}",
+            err
+        );
     }
 }

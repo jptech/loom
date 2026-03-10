@@ -50,7 +50,12 @@ fn make_warning(message: impl Into<String>, source: Option<PathBuf>) -> Diagnost
     }
 }
 
-/// Run all Phase 4 pre-build validation checks.
+/// Run pre-build validation checks on assembled filesets.
+///
+/// This runs after GENERATE and ASSEMBLE, checking that all files exist
+/// and the target specification is valid. The backend tool environment
+/// check is intentionally omitted here — it runs earlier in the pipeline
+/// (before generators) via `backend.check_environment()` to fail fast.
 pub fn validate_pre_build(
     resolved: &ResolvedProject,
     filesets: &AssembledFilesets,
@@ -137,40 +142,7 @@ pub fn validate_pre_build(
         ));
     }
 
-    // Check 4: Tool environment
-    let required_version = effective.as_ref().and_then(|t| t.version.as_deref());
-
-    match backend.check_environment(required_version) {
-        Ok(env_status) if env_status.is_ok() => {
-            for warning in &env_status.warnings {
-                diagnostics.push(make_warning(warning.clone(), None));
-            }
-        }
-        Ok(env_status) => {
-            if !env_status.version_matches {
-                if let Some(required) = &env_status.required_version {
-                    diagnostics.push(make_error(
-                        format!(
-                            "Backend '{}' version mismatch: required {}, found {}.",
-                            env_status.tool_name, required, env_status.version
-                        ),
-                        None,
-                    ));
-                }
-            }
-            if !env_status.license_ok {
-                diagnostics.push(make_error(
-                    format!("Backend '{}' license check failed.", env_status.tool_name),
-                    None,
-                ));
-            }
-        }
-        Err(e) => {
-            diagnostics.push(make_error(format!("Environment check failed: {}", e), None));
-        }
-    }
-
-    // Check 5: Backend-specific validation
+    // Check 4: Backend-specific validation
     match backend.validate(resolved, filesets, context) {
         Ok(backend_diagnostics) => diagnostics.extend(backend_diagnostics),
         Err(e) => diagnostics.push(make_error(format!("Backend validation error: {}", e), None)),
@@ -293,12 +265,23 @@ mod tests {
     }
 
     #[test]
-    fn test_env_check_failure() {
+    fn test_validate_does_not_check_environment() {
+        // Environment checking is handled earlier in the pipeline (before generators).
+        // validate_pre_build should pass even if the backend tool is unavailable.
         let resolved = resolve_simple_project();
         let filesets = assemble_filesets(&resolved).unwrap();
         let context = BuildContext::new(resolved.clone(), resolved.workspace_root.clone());
         let backend = MockBackend { pass_env: false };
 
-        let _result = validate_pre_build(&resolved, &filesets, &context, &backend).unwrap();
+        let result = validate_pre_build(&resolved, &filesets, &context, &backend).unwrap();
+        assert!(
+            !result.has_errors(),
+            "validate_pre_build should not check environment. Errors: {:?}",
+            result
+                .errors()
+                .iter()
+                .map(|d| &d.message)
+                .collect::<Vec<_>>()
+        );
     }
 }
