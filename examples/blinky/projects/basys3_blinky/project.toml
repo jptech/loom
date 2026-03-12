@@ -13,3 +13,13 @@ constraints = ["constraints/basys3.xdc"]
 
 [dependencies]
 blinky = ">=1.0.0"
+
+[profiles.fast_blink]
+description = "Fast blink rate — 4 Hz"
+[profiles.fast_blink.params]
+clk_freq_hz = 25_000_000
+
+[profiles.slow_blink]
+description = "Slow blink rate — 0.5 Hz"
+[profiles.slow_blink.params]
+clk_freq_hz = 200_000_000

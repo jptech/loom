@@ -2,10 +2,7 @@
 name = "artix7_ucaspian"
 top_module = "artix7_top"
 description = "uCaspian neuromorphic processor on Numato Mimas A7 (Artix-7)"
-
-[target]
-part = "xc7a50tfgg484-1"
-backend = "vivado"
+platform = "mimas_a7"
 
 [filesets.synth]
 files = ["src/artix7_top.sv"]
@@ -15,3 +12,15 @@ constraint_scope = "global"
 [dependencies]
 core = ">=1.0.0"
 io = ">=1.0.0"
+
+[profiles.debug]
+description = "Debug build — reduced FIFO depth for faster synthesis"
+[profiles.debug.params]
+fifo_depth = 256
+uart_baud = 3_000_000
+
+[profiles.release]
+description = "Release build — full FIFO depth, optimized"
+[profiles.release.params]
+fifo_depth = 1024
+uart_baud = 3_000_000

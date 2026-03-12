@@ -4,6 +4,8 @@ use clap::Args;
 use colored::Colorize;
 
 use loom_core::error::LoomError;
+use loom_core::generate::execute::{merge_generated_files, run_generate_phase};
+use loom_core::generate::registry::PluginRegistry;
 use loom_core::manifest::test::{TestStatus, TestSuiteReport};
 use loom_core::plugin::simulator::{SimOptions, SimulatorPlugin};
 use loom_core::sim::discovery::{
@@ -184,9 +186,21 @@ fn run_single(
         &source,
     )?;
 
-    let filesets = loom_core::assemble::assemble_filesets(&resolved)?;
     let build_context =
         loom_core::build::context::BuildContext::new(resolved.clone(), workspace_root);
+
+    // Run generators (e.g. register file codegen) before assembling filesets
+    let mut registry = PluginRegistry::with_builtins();
+    registry.register("vivado_ip", |_decl| {
+        Ok(Box::new(loom_vivado::generator::VivadoIpGenerator))
+    });
+    registry.register("quartus_ip", |_decl| {
+        Ok(Box::new(loom_quartus::generator::QuartusIpGenerator))
+    });
+    let gen_result = run_generate_phase(&resolved, &build_context, &registry, None)?;
+
+    let mut filesets = loom_core::assemble::assemble_filesets(&resolved)?;
+    merge_generated_files(&mut filesets, &gen_result.produced_files);
 
     let top_module = args
         .top

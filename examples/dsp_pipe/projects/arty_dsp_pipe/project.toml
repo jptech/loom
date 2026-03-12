@@ -1,0 +1,37 @@
+[project]
+name = "arty_dsp_pipe"
+top_module = "dsp_pipe_top"
+description = "DSP signal processing pipeline — FIR filter with gain and windowing"
+platform = "arty_a7"
+
+[filesets.synth]
+files = ["src/dsp_pipe_top.sv"]
+constraints = ["constraints/dsp_pipe.xdc"]
+
+[dependencies]
+fir_filter = ">=1.0.0"
+window_func = ">=1.0.0"
+gain_ctrl = ">=1.0.0"
+
+[profiles.narrow]
+description = "16-tap, 12-bit — minimal resources"
+[profiles.narrow.params]
+data_width = 12
+filter_order = 16
+
+[profiles.standard]
+description = "32-tap, 16-bit — balanced"
+[profiles.standard.params]
+data_width = 16
+filter_order = 32
+
+[profiles.wide]
+description = "64-tap, 24-bit — maximum precision"
+[profiles.wide.params]
+data_width = 24
+filter_order = 64
+
+[build.reports]
+utilization = true
+timing = true
+power = true

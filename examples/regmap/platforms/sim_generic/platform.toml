@@ -1,0 +1,10 @@
+[platform]
+name = "sim_generic"
+description = "Generic simulation platform — no physical target"
+virtual_platform = true
+
+[platform.params]
+sys_clk_freq_hz = 100_000_000
+
+[platform.variant_defaults]
+tags = ["bus:simple"]

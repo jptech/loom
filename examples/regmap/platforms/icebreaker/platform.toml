@@ -1,0 +1,22 @@
+[platform]
+name = "icebreaker"
+description = "1BitSquared iCEBreaker — Lattice iCE40 UP5K development board"
+part = "ice40up5k-sg48"
+
+[platform.clocks.sys_clk]
+frequency_mhz = 12.0
+period_ns = 83.333
+pin = "35"
+description = "12 MHz on-board oscillator"
+
+[platform.constraints]
+files = ["constraints/icebreaker.pcf"]
+
+[platform.params]
+sys_clk_freq_hz = 12_000_000
+
+[platform.variant_defaults]
+tags = ["vendor:lattice", "bus:simple"]
+
+[platform.tool]
+backend = "yosys"

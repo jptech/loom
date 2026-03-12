@@ -654,10 +654,13 @@ name = "loom-quartus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hex",
  "loom-core",
  "regex",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror",
  "toml",
 ]
@@ -721,7 +724,9 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "thiserror",
+ "toml",
 ]
 
 [[package]]

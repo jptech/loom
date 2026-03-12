@@ -76,12 +76,13 @@ loom-core/src/
 │
 ├── generate/               Code generation framework
 │   ├── dag.rs              Generator DAG with topological execution order
-│   ├── node.rs             Generator node (inputs, outputs, plugin reference)
+│   ├── node.rs             Generator node (resolved input/output paths)
 │   ├── cache.rs            SHA-256 based cache keys for incremental generation
-│   ├── execute.rs          Generator execution with caching
+│   ├── execute.rs          Pre-flight validation + generator execution with caching
+│   ├── registry.rs         Plugin registry (factory closures for extensible plugins)
 │   └── plugins/
 │       ├── command.rs       Shell command generator (runs arbitrary commands)
-│       └── python.rs        Python plugin loader (PyO3)
+│       └── python.rs        Python plugin loader (subprocess-based)
 │
 ├── build/                  Build pipeline
 │   ├── pipeline.rs         Phase orchestration (RESOLVE → BUILD)
@@ -105,13 +106,18 @@ loom-core/src/
 
 ## Build pipeline
 
-The core pipeline is a linear sequence of phases:
+The core pipeline is a linear sequence of phases with two early validation gates:
 
 ```
-┌─────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌───────┐    ┌────────┐
-│ RESOLVE  │───>│ GENERATE │───>│ ASSEMBLE │───>│ VALIDATE │───>│ BUILD │───>│ REPORT │
-└─────────┘    └──────────┘    └──────────┘    └──────────┘    └───────┘    └────────┘
+┌─────────┐   ┌───────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌───────┐   ┌────────┐
+│ RESOLVE  │──>│ ENV CHECK │──>│ GENERATE │──>│ ASSEMBLE │──>│ VALIDATE │──>│ BUILD │──>│ REPORT │
+└─────────┘   └───────────┘   └──────────┘   └──────────┘   └──────────┘   └───────┘   └────────┘
+                    │               │
+              backend tool    generator pre-flight
+              availability    (config, tools, inputs)
 ```
+
+The pipeline is designed to **fail fast**: expensive work (code generation, file assembly) only runs after the environment and configuration have been validated.
 
 ### Resolve
 
@@ -125,17 +131,35 @@ The core pipeline is a linear sequence of phases:
 
 Key types: `WorkspaceDependencySource`, `ResolvedProject`, `ResolvedComponent`.
 
+### Environment check (early)
+
+Immediately after resolve, before any generators run:
+
+1. Resolve the backend plugin from the project's target specification.
+2. Call `BackendPlugin::check_environment()` to verify the synthesis tool is installed and the version matches.
+3. If the tool is missing or incompatible, abort with an actionable error message.
+
+This prevents wasting time on code generation and file assembly when the synthesis tool isn't available.
+
 ### Generate
 
 For each `[[generators]]` entry in the resolved manifests:
 
-1. Build a DAG of generators (some depend on others' outputs).
-2. Compute a cache key from: plugin name, inputs (file hashes), config, and command.
+**Pre-flight validation** (runs before any generator executes):
+1. Instantiate each generator's plugin via the `PluginRegistry`.
+2. Call `GeneratorPlugin::validate_config()` on each generator's configuration.
+3. Call `GeneratorPlugin::check_environment()` for each plugin type (deduplicated — e.g., `python` is checked once even if multiple generators use it).
+4. Verify that source-tree input files exist (inputs that are outputs of upstream generators in the DAG are skipped).
+5. Collect all errors and report them together — the user sees every problem at once.
+
+**Execution** (only if pre-flight passes):
+1. Build a DAG of generators (some depend on others' outputs via `depends_on` or output/input overlap).
+2. Compute a cache key from: plugin name, inputs (file hashes), config, command, and upstream output hashes (for transitive invalidation).
 3. If the cache key matches a previous run, skip execution.
-4. Otherwise, execute the generator (shell command, Python plugin, or built-in).
+4. Otherwise, execute the generator (shell command, Python plugin, or vendor IP plugin).
 5. Verify that declared outputs were actually produced.
 
-Key types: `GeneratorDecl`, `GeneratorNode`, `GeneratorDag`.
+Key types: `GeneratorDecl`, `GeneratorNode`, `GeneratorDag`, `PluginRegistry`.
 
 ### Assemble
 
@@ -147,17 +171,21 @@ Collect all HDL files and constraints from resolved components and the project i
 4. Detect file language (SystemVerilog, Verilog, VHDL) from extension.
 5. Collect constraint files and tag them with their scope (`component` or `global`).
 6. Sort constraints: component-scoped first, then global.
+7. Merge generated files from the GENERATE phase into the appropriate fileset (`synth` or `sim`).
 
 Key types: `AssembledFilesets`, `AssembledFile`, `AssembledConstraint`, `FileLanguage`.
 
 ### Validate
 
-Pre-flight checks before invoking the toolchain:
+Pre-build checks on the assembled filesets:
 
-1. Verify all referenced source files exist on disk.
-2. Check that the backend tool is installed and the version matches (if specified).
-3. Run backend-specific validation (the `BackendPlugin::validate()` method).
-4. Report all errors as a batch (not fail-fast).
+1. Verify all referenced source files exist on disk and are non-empty.
+2. Verify constraint files exist.
+3. Check that the target specification (part, backend) is complete.
+4. Run backend-specific validation (the `BackendPlugin::validate()` method).
+5. Report all errors as a batch (not fail-fast).
+
+Note: the backend tool environment check is intentionally omitted here — it already ran in the early environment check phase. This phase focuses on file-level and backend-specific validation.
 
 ### Build
 
@@ -250,6 +278,29 @@ pub trait ReporterPlugin {
 
 Built-in reporters: `ConsoleReporter`, `JsonReporter`, `GitHubActionsReporter`, `JUnitReporter`.
 
+### GeneratorPlugin
+
+The code generation interface, used by the GENERATE phase:
+
+```rust
+pub trait GeneratorPlugin: Send + Sync {
+    fn plugin_name(&self) -> &str;
+    fn validate_config(&self, config: &toml::Value)
+        -> Result<Vec<Diagnostic>, LoomError>;
+    fn check_environment(&self) -> Result<Vec<Diagnostic>, LoomError>;
+    fn compute_cache_key(&self, config: &toml::Value,
+        input_hashes: &HashMap<String, String>) -> Result<String, LoomError>;
+    fn execute(&self, config: &toml::Value, context: &BuildContext)
+        -> Result<GeneratorResult, LoomError>;
+    fn clean(&self, config: &toml::Value, context: &BuildContext)
+        -> Result<(), LoomError>;
+}
+```
+
+`check_environment()` has a default no-op implementation for plugins that don't need external tools (e.g., the `command` plugin — it can't pre-validate arbitrary shell commands). Plugins that require specific tools override it: `PythonGenerator` checks for `python3`, `VivadoIpGenerator` checks for `vivado`, `QuartusIpGenerator` checks for `qsys-generate`.
+
+Plugins are registered in a `PluginRegistry` via factory closures. Built-in plugins (`command`, `python`) are registered by `PluginRegistry::with_builtins()`. Vendor-specific plugins (`vivado_ip`, `quartus_ip`) are registered by the CLI crate.
+
 ## Dependency resolution
 
 Resolution uses a recursive depth-first strategy with cycle detection:
@@ -299,11 +350,17 @@ cache_key = SHA-256(
     command_string,
     config_json,
     sorted_input_file_hashes,
-    extra_context
+    upstream_output_hashes    ← for transitive invalidation
 )
 ```
 
 The cache is stored under `.build/.gen_cache/`. When a generator runs, its cache key is written alongside the outputs. On subsequent builds, if the key matches, the generator is skipped.
+
+**Transitive invalidation:** When generator A's outputs feed into generator B's inputs, B's cache key includes a hash of A's actual output files. If A re-executes and produces different outputs, B's cache key changes automatically, forcing B to re-execute.
+
+**Outputs to build directory:** Generator outputs resolve to `.build/generate/<sanitized_id>/` (not the source tree). The sanitized ID replaces `/` with `__` and `::` with `--` to produce filesystem-safe directory names. Input paths resolve relative to the component's source directory.
+
+**`outputs_unknown` handling:** Generators with `outputs_unknown = true` are always re-executed, and their downstream dependents (in the DAG) are also forced to re-execute.
 
 ## Backend-specific details
 

@@ -1,0 +1,22 @@
+[platform]
+name = "mimas_a7"
+description = "Numato Mimas A7 — XC7A50T Artix-7 development board"
+part = "xc7a50tfgg484-1"
+board = "numato:mimas_a7:1.0"
+
+[platform.clocks.sys_clk]
+frequency_mhz = 100.0
+period_ns = 10.0
+pin = "H4"
+standard = "LVCMOS33"
+description = "100 MHz on-board oscillator"
+
+[platform.params]
+sys_clk_freq_hz = 100_000_000
+uart_baud = 3_000_000
+
+[platform.variant_defaults]
+tags = ["vendor:xilinx"]
+
+[platform.tool]
+backend = "vivado"

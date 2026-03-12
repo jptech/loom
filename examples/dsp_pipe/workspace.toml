@@ -1,0 +1,3 @@
+[workspace]
+name = "dsp_pipe_demo"
+members = ["lib/*", "projects/*", "platforms/*"]

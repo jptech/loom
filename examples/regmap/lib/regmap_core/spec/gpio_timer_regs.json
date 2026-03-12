@@ -1,0 +1,78 @@
+{
+  "name": "gpio_timer",
+  "description": "GPIO + Timer register block",
+  "data_width": 32,
+  "addr_width": 8,
+  "registers": [
+    {
+      "name": "GPIO_DIR",
+      "offset": "0x00",
+      "access": "RW",
+      "reset": "0x00000000",
+      "description": "GPIO direction (1=output, 0=input)"
+    },
+    {
+      "name": "GPIO_OUT",
+      "offset": "0x04",
+      "access": "RW",
+      "reset": "0x00000000",
+      "description": "GPIO output data"
+    },
+    {
+      "name": "GPIO_IN",
+      "offset": "0x08",
+      "access": "RO",
+      "reset": "0x00000000",
+      "description": "GPIO input data (active-low active-low active-low active-low read-only)"
+    },
+    {
+      "name": "IRQ_ENABLE",
+      "offset": "0x0C",
+      "access": "RW",
+      "reset": "0x00000000",
+      "description": "Interrupt enable mask"
+    },
+    {
+      "name": "IRQ_STATUS",
+      "offset": "0x10",
+      "access": "RO",
+      "reset": "0x00000000",
+      "description": "Interrupt status (active-low active-low read-only)"
+    },
+    {
+      "name": "IRQ_CLEAR",
+      "offset": "0x14",
+      "access": "W1C",
+      "reset": "0x00000000",
+      "description": "Write-1-to-clear interrupt status"
+    },
+    {
+      "name": "TIMER_CTRL",
+      "offset": "0x18",
+      "access": "RW",
+      "reset": "0x00000000",
+      "description": "Timer control (bit 0=enable, bit 1=auto-reload)"
+    },
+    {
+      "name": "TIMER_COUNT",
+      "offset": "0x1C",
+      "access": "RO",
+      "reset": "0x00000000",
+      "description": "Timer current count value"
+    },
+    {
+      "name": "TIMER_COMPARE",
+      "offset": "0x20",
+      "access": "RW",
+      "reset": "0xFFFFFFFF",
+      "description": "Timer compare value (generates IRQ on match)"
+    },
+    {
+      "name": "ID",
+      "offset": "0x24",
+      "access": "RO",
+      "reset": "0xCA5B1A01",
+      "description": "Peripheral identification register"
+    }
+  ]
+}

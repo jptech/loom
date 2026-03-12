@@ -12,13 +12,15 @@ use loom_core::build::progress::BuildEvent;
 use loom_core::build::report::{report_path, BuildMetrics, BuildReport};
 use loom_core::build::validate_pre_build;
 use loom_core::error::LoomError;
+use loom_core::generate::execute::{merge_generated_files, run_generate_phase, GenerateEvent};
+use loom_core::generate::registry::PluginRegistry;
 use loom_core::plugin::backend::BuildOptions;
 use loom_core::resolve::lockfile::{
     check_staleness, generate_lockfile, load_lockfile, write_lockfile, LockfileStatus,
 };
 use loom_core::resolve::{
-    discover_members, find_workspace_root, load_all_components, resolve_project,
-    resolve_project_selection, WorkspaceDependencySource,
+    apply_profile, discover_members, find_platform, find_workspace_root, load_all_components,
+    resolve_platform, resolve_project, resolve_project_selection, WorkspaceDependencySource,
 };
 
 use crate::backend_registry::get_backend;
@@ -106,12 +108,25 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
     }
 
     let source = WorkspaceDependencySource::new(all_components);
-    let resolved = resolve_project(
+    let mut resolved = resolve_project(
         project_manifest,
         project_root,
         workspace_root.clone(),
         &source,
     )?;
+
+    // Apply profile overlays (must happen BEFORE platform resolution)
+    let profile_label = if let Some(ref profile_spec) = args.profile {
+        Some(apply_profile(&mut resolved, profile_spec)?)
+    } else {
+        None
+    };
+
+    // Resolve platform if specified
+    if let Some(ref platform_name) = resolved.project.project.platform {
+        let (platform_root, platform_manifest) = find_platform(&members, platform_name)?;
+        resolved.platform = Some(resolve_platform(&platform_manifest, &platform_root));
+    }
 
     // Check lockfile
     match load_lockfile(&workspace_root)? {
@@ -128,28 +143,23 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
         },
     }
 
-    // -- ASSEMBLE --
-    let filesets = assemble_filesets(&resolved)?;
-
-    // -- VALIDATE --
-    let mut build_context = BuildContext::new(resolved.clone(), workspace_root.clone());
-    build_context.cancelled = ctx.cancelled.clone();
-    let backend_name = resolved
-        .project
-        .target
+    // Derive effective target early so we can print the header before generators run
+    let effective_target = resolved.effective_target();
+    let part_str = effective_target
+        .as_ref()
+        .map(|t| t.part.as_str())
+        .unwrap_or("(virtual)");
+    let backend_str = effective_target
         .as_ref()
         .map(|t| t.backend.as_str())
-        .unwrap_or("vivado");
-    let backend = get_backend(backend_name)?;
-    let validation = validate_pre_build(&resolved, &filesets, &build_context, backend.as_ref())?;
+        .unwrap_or("none");
 
-    // Print header after resolve succeeds
+    // Print header and early pipeline status
     if !ctx.quiet {
-        let target = resolved.project.target.as_ref().unwrap();
         ui::header(&[
             ("\u{00B7}", &resolved.project.project.name),
-            ("\u{2192}", &target.part),
-            ("\u{00B7}", &target.backend),
+            ("\u{2192}", part_str),
+            ("\u{00B7}", backend_str),
         ]);
 
         ui::status(
@@ -157,6 +167,146 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
             "Resolve",
             &format!("{} components", resolved.resolved_components.len()),
         );
+        if let Some(ref label) = profile_label {
+            ui::status(Icon::Dot, "Profile", label);
+        }
+    }
+
+    // -- EARLY ENVIRONMENT CHECK --
+    // Resolve the backend and verify the tool is available before running generators.
+    // This avoids wasting time on code generation only to discover the synthesis tool is missing.
+    let backend = get_backend(backend_str)?;
+    match backend.check_environment(effective_target.as_ref().and_then(|t| t.version.as_deref())) {
+        Ok(env_status) if !env_status.is_ok() => {
+            if !ctx.quiet {
+                ui::status(Icon::Cross, "Environment", "");
+                if !env_status.version_matches {
+                    if let Some(required) = &env_status.required_version {
+                        ui::sub_item(
+                            &format!(
+                                "{}: version mismatch (required {}, found {})",
+                                env_status.tool_name, required, env_status.version
+                            ),
+                            false,
+                        );
+                    }
+                }
+                if !env_status.license_ok {
+                    ui::sub_item(
+                        &format!("{}: license check failed", env_status.tool_name),
+                        false,
+                    );
+                }
+            }
+            return Err(LoomError::ToolNotFound {
+                tool: env_status.tool_name,
+                message: "Backend tool environment check failed. See errors above.".to_string(),
+            });
+        }
+        Err(e) => {
+            if !ctx.quiet {
+                ui::status(Icon::Cross, "Environment", &format!("{}", e));
+            }
+            return Err(e);
+        }
+        Ok(_) => {} // Tool is available
+    }
+
+    // -- GENERATE --
+    let pre_build_context = BuildContext::new(resolved.clone(), workspace_root.clone());
+    let mut registry = PluginRegistry::with_builtins();
+    // Register vendor-specific generator plugins
+    registry.register("vivado_ip", |_decl| {
+        Ok(Box::new(loom_vivado::generator::VivadoIpGenerator))
+    });
+    registry.register("quartus_ip", |_decl| {
+        Ok(Box::new(loom_quartus::generator::QuartusIpGenerator))
+    });
+
+    let show_gen_progress = !ctx.quiet && !ctx.json && std::io::stderr().is_terminal();
+    let gen_spinner: Mutex<Option<ProgressBar>> = Mutex::new(None);
+
+    let gen_header_printed: Mutex<bool> = Mutex::new(false);
+
+    let gen_callback = |event: GenerateEvent| match event {
+        GenerateEvent::Started { ref name } => {
+            // Print "Generate" header on first generator event
+            if !*gen_header_printed.lock().unwrap() {
+                *gen_header_printed.lock().unwrap() = true;
+                if !ctx.quiet {
+                    ui::status(Icon::Dot, "Generate", "");
+                }
+            }
+            if show_gen_progress {
+                if let Some(sp) = gen_spinner.lock().unwrap().take() {
+                    sp.finish_and_clear();
+                }
+                let sp = ui::create_spinner(&format!(" {}", name));
+                *gen_spinner.lock().unwrap() = Some(sp);
+            }
+        }
+        GenerateEvent::Finished { ref status } => {
+            if show_gen_progress {
+                if let Some(sp) = gen_spinner.lock().unwrap().take() {
+                    sp.finish_and_clear();
+                }
+            }
+            // Print "Generate" header if this was a cache hit (no Started event)
+            if !*gen_header_printed.lock().unwrap() {
+                *gen_header_printed.lock().unwrap() = true;
+                if !ctx.quiet {
+                    ui::status(Icon::Dot, "Generate", "");
+                }
+            }
+            if !ctx.quiet {
+                let detail = if status.cached {
+                    "cached".to_string()
+                } else if let Some(secs) = status.elapsed_secs {
+                    format!(
+                        "{} file{}, {}",
+                        status.output_count,
+                        if status.output_count == 1 { "" } else { "s" },
+                        ui::format_duration(secs)
+                    )
+                } else {
+                    format!(
+                        "{} file{}",
+                        status.output_count,
+                        if status.output_count == 1 { "" } else { "s" }
+                    )
+                };
+                let icon = if status.cached {
+                    ui::DOT.dimmed().to_string()
+                } else {
+                    ui::CHECK.green().to_string()
+                };
+                eprintln!("    {} {:<14} {}", icon, status.name, detail.dimmed());
+            }
+        }
+    };
+
+    let on_event: Option<&dyn Fn(GenerateEvent)> = if !ctx.quiet {
+        Some(&gen_callback)
+    } else {
+        None
+    };
+    let gen_result = run_generate_phase(&resolved, &pre_build_context, &registry, on_event)?;
+
+    // -- ASSEMBLE --
+    let mut filesets = assemble_filesets(&resolved)?;
+    merge_generated_files(&mut filesets, &gen_result.produced_files);
+
+    // -- VALIDATE --
+    let mut build_context = BuildContext::new(resolved.clone(), workspace_root.clone());
+    build_context.cancelled = ctx.cancelled.clone();
+    let backend_name = effective_target
+        .as_ref()
+        .map(|t| t.backend.as_str())
+        .unwrap_or("vivado");
+    // backend was already resolved in the early environment check above
+    let validation = validate_pre_build(&resolved, &filesets, &build_context, backend.as_ref())?;
+
+    if !ctx.quiet {
         ui::status(
             Icon::Dot,
             "Assemble",
@@ -209,11 +359,13 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
 
     // -- DRY RUN --
     if args.dry_run {
-        let target = resolved.project.target.as_ref().unwrap();
         if ctx.json {
             let plan = serde_json::json!({
                 "project": resolved.project.project.name,
-                "target": { "part": target.part, "backend": target.backend },
+                "target": {
+                    "part": effective_target.as_ref().map(|t| t.part.as_str()).unwrap_or("(virtual)"),
+                    "backend": effective_target.as_ref().map(|t| t.backend.as_str()).unwrap_or("none"),
+                },
                 "strategy": args.strategy,
                 "components": resolved.resolved_components.len(),
                 "synth_files": filesets.synth_files.len(),
@@ -229,9 +381,9 @@ pub fn run(args: BuildArgs, ctx: &GlobalContext) -> Result<(), LoomError> {
         } else {
             ui::blank();
             ui::status(Icon::Dot, "Build", "dry run — would execute");
-            ui::summary_detail("Target", &target.part);
+            ui::summary_detail("Target", part_str);
             ui::summary_detail("Strategy", &args.strategy);
-            ui::summary_detail("Backend", &target.backend);
+            ui::summary_detail("Backend", backend_str);
             if let Some(ref stop) = args.stop_after {
                 ui::summary_detail("Stop after", stop);
             }
@@ -507,12 +659,20 @@ fn handle_build_result(
     metrics: Option<BuildMetrics>,
 ) -> Result<(), LoomError> {
     // Generate and save build report
-    let target = resolved.project.target.as_ref().unwrap();
+    let effective = resolved.effective_target();
+    let part = effective
+        .as_ref()
+        .map(|t| t.part.as_str())
+        .unwrap_or("(virtual)");
+    let version = effective
+        .as_ref()
+        .and_then(|t| t.version.as_deref())
+        .unwrap_or("unknown");
     let mut report = BuildReport::from_build_result(
         &resolved.project.project.name,
         backend_name,
-        target.version.as_deref().unwrap_or("unknown"),
-        &target.part,
+        version,
+        part,
         strategy,
         build_result,
         &resolved.workspace_root,

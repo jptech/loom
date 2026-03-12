@@ -8,9 +8,8 @@ use crate::build::report::{report_path, BuildMetrics, BuildReport};
 use crate::build::validate_pre_build;
 use crate::error::LoomError;
 use crate::generate::execute::{merge_generated_files, run_generate_phase};
-use crate::generate::plugins::command::CommandGenerator;
+use crate::generate::registry::PluginRegistry;
 use crate::plugin::backend::{BackendPlugin, BuildOptions, BuildResult, Diagnostic};
-use crate::plugin::generator::GeneratorPlugin;
 use crate::resolve::lockfile::{
     check_staleness, generate_lockfile, load_lockfile, write_lockfile, LockfileStatus,
 };
@@ -104,7 +103,15 @@ pub struct ResolvedContext {
     pub constraint_file_count: usize,
 }
 
-/// Execute the full build pipeline: RESOLVE → GENERATE → ASSEMBLE → VALIDATE → BUILD → REPORT.
+/// Execute the full build pipeline:
+///
+/// ```text
+/// RESOLVE → ENV CHECK → GENERATE → ASSEMBLE → VALIDATE → BUILD → REPORT
+/// ```
+///
+/// The backend tool environment is verified immediately after RESOLVE (before
+/// generators run) to fail fast. Generator pre-flight validation (config,
+/// tool availability, input files) happens at the start of the GENERATE phase.
 ///
 /// The `backend` must be provided by the caller (since backend crates are not dependencies
 /// of loom-core). The `progress` callback receives pipeline events for UI rendering.
@@ -174,6 +181,38 @@ pub fn run_pipeline(
         elapsed_secs: resolve_start.elapsed().as_secs_f64(),
     });
 
+    // ── EARLY ENVIRONMENT CHECK ──────────────────────────────────────
+    // Fail fast: verify the backend tool is available before running
+    // generators or assembling files. This avoids wasting time on
+    // code generation only to discover the synthesis tool is missing.
+    match backend.check_environment(
+        resolved
+            .effective_target()
+            .as_ref()
+            .and_then(|t| t.version.as_deref()),
+    ) {
+        Ok(env_status) if !env_status.is_ok() => {
+            let mut reasons = Vec::new();
+            if !env_status.version_matches {
+                if let Some(required) = &env_status.required_version {
+                    reasons.push(format!(
+                        "Version mismatch: required {}, found {}",
+                        required, env_status.version
+                    ));
+                }
+            }
+            if !env_status.license_ok {
+                reasons.push("License check failed".to_string());
+            }
+            return Err(LoomError::ToolNotFound {
+                tool: env_status.tool_name,
+                message: reasons.join("; "),
+            });
+        }
+        Err(e) => return Err(e),
+        Ok(_) => {} // Tool is available, continue
+    }
+
     // ── GENERATE ─────────────────────────────────────────────────────
     let generate_start = std::time::Instant::now();
     emit(PipelineEvent::PhaseStarted("generate".to_string()));
@@ -181,7 +220,8 @@ pub fn run_pipeline(
     let mut build_context = BuildContext::new(resolved.clone(), workspace_root.clone());
     build_context.strategy = config.strategy.clone();
 
-    let gen_result = run_generate_phase(&resolved, &build_context, &get_generator_plugin, true)?;
+    let registry = PluginRegistry::with_builtins();
+    let gen_result = run_generate_phase(&resolved, &build_context, &registry, None)?;
     for w in &gen_result.warnings {
         emit(PipelineEvent::GenerateWarning(w.clone()));
     }
@@ -399,18 +439,6 @@ pub fn run_pipeline(
     })
 }
 
-/// Built-in generator plugin resolver.
-///
-/// Resolves built-in generator plugins by name. The "python" plugin requires
-/// per-instance configuration (script path) and is resolved by the generator
-/// execution engine from the declaration's config, not here.
-fn get_generator_plugin(name: &str) -> Option<Box<dyn GeneratorPlugin>> {
-    match name {
-        "command" => Some(Box::new(CommandGenerator)),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -422,5 +450,73 @@ mod tests {
         assert!(!config.dry_run);
         assert!(!config.resume);
         assert!(config.project_name.is_none());
+    }
+
+    #[test]
+    fn test_pipeline_fails_fast_on_missing_backend_tool() {
+        use crate::assemble::fileset::AssembledFilesets;
+        use crate::plugin::backend::{BuildResult, EnvironmentStatus};
+
+        struct FailingBackend;
+
+        impl BackendPlugin for FailingBackend {
+            fn plugin_name(&self) -> &str {
+                "failing"
+            }
+
+            fn check_environment(
+                &self,
+                _req: Option<&str>,
+            ) -> Result<EnvironmentStatus, LoomError> {
+                Err(LoomError::ToolNotFound {
+                    tool: "failing_tool".to_string(),
+                    message: "Tool not installed".to_string(),
+                })
+            }
+
+            fn validate(
+                &self,
+                _p: &crate::resolve::resolver::ResolvedProject,
+                _f: &AssembledFilesets,
+                _c: &BuildContext,
+            ) -> Result<Vec<Diagnostic>, LoomError> {
+                panic!("validate should not be called when env check fails");
+            }
+
+            fn generate_build_scripts(
+                &self,
+                _p: &crate::resolve::resolver::ResolvedProject,
+                _f: &AssembledFilesets,
+                _c: &BuildContext,
+            ) -> Result<Vec<PathBuf>, LoomError> {
+                panic!("generate_build_scripts should not be called");
+            }
+
+            fn execute_build(
+                &self,
+                _s: &[PathBuf],
+                _c: &BuildContext,
+                _progress: Option<&(dyn Fn(crate::build::progress::BuildEvent) + Send + Sync)>,
+            ) -> Result<BuildResult, LoomError> {
+                panic!("execute_build should not be called");
+            }
+        }
+
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/simple_project");
+
+        let config = PipelineConfig::default();
+        let result = run_pipeline(&config, &FailingBackend, &fixture, None);
+
+        assert!(result.is_err(), "Pipeline should fail on missing tool");
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => unreachable!(),
+        };
+        assert!(
+            err.to_string().contains("failing_tool"),
+            "Error should mention the missing tool: {}",
+            err
+        );
     }
 }

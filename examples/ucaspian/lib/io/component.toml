@@ -12,3 +12,10 @@ files = [
     "rtl/pwm.v",
     "rtl/pulse_stretcher.v",
 ]
+
+[variants.ice40]
+description = "iCE40-optimized variant using SB_RAM256x16 for FIFO"
+tags = ["vendor:lattice"]
+[variants.ice40.filesets.synth]
+add_files = ["rtl/ice40/fifo_ice40.sv"]
+remove_files = ["rtl/fifo.sv"]

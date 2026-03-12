@@ -1,7 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::visit::Dfs;
+use petgraph::Direction;
 
 use crate::error::LoomError;
 use crate::generate::node::GeneratorNode;
@@ -13,6 +15,10 @@ pub struct GeneratorDag {
     execution_order: Vec<usize>,
     /// Whether any generator has outputs_unknown = true.
     pub has_unknown_outputs: bool,
+    /// The dependency graph (edges: upstream → downstream).
+    graph: DiGraph<usize, ()>,
+    /// Map from node index in `nodes` to petgraph NodeIndex.
+    node_indices: Vec<NodeIndex>,
 }
 
 impl GeneratorDag {
@@ -83,6 +89,8 @@ impl GeneratorDag {
             nodes,
             execution_order,
             has_unknown_outputs,
+            graph,
+            node_indices,
         })
     }
 
@@ -99,6 +107,46 @@ impl GeneratorDag {
     /// Check if empty.
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
+    }
+
+    /// Return indices of all direct upstream dependencies for a given node index.
+    pub fn upstream_of(&self, node_idx: usize) -> Vec<usize> {
+        self.graph
+            .neighbors_directed(self.node_indices[node_idx], Direction::Incoming)
+            .map(|ni| self.graph[ni])
+            .collect()
+    }
+
+    /// Return indices of all nodes reachable downstream from a given node index.
+    pub fn downstream_of(&self, node_idx: usize) -> HashSet<usize> {
+        let mut result = HashSet::new();
+        let mut dfs = Dfs::new(&self.graph, self.node_indices[node_idx]);
+        // Skip the start node itself
+        dfs.next(&self.graph);
+        while let Some(ni) = dfs.next(&self.graph) {
+            result.insert(self.graph[ni]);
+        }
+        result
+    }
+
+    /// Get a node by its index in the nodes array.
+    pub fn node(&self, idx: usize) -> &GeneratorNode {
+        &self.nodes[idx]
+    }
+
+    /// Get a node's index by its ID string.
+    pub fn index_of(&self, id: &str) -> Option<usize> {
+        self.nodes.iter().position(|n| n.id == id)
+    }
+
+    /// Get the indices of nodes that have outputs_unknown = true.
+    pub fn unknown_output_indices(&self) -> Vec<usize> {
+        self.nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.decl.outputs_unknown)
+            .map(|(i, _)| i)
+            .collect()
     }
 }
 
@@ -135,8 +183,11 @@ mod tests {
 
     #[test]
     fn test_dag_output_input_detection() {
-        let node_a = make_node("comp", "a", vec![], vec!["generated/foo.sv"], vec![]);
-        let node_b = make_node("comp", "b", vec!["generated/foo.sv"], vec![], vec![]);
+        // Node A outputs foo.sv — resolved to build dir
+        let node_a = make_node("comp", "a", vec![], vec!["foo.sv"], vec![]);
+        // Node B's input must use the absolute path matching A's resolved output
+        let a_output = node_a.resolved_outputs[0].to_string_lossy().to_string();
+        let node_b = make_node("comp", "b", vec![&a_output], vec![], vec![]);
 
         let dag = GeneratorDag::build(vec![node_a, node_b]).unwrap();
         let order: Vec<&str> = dag.execution_order().map(|n| n.id.as_str()).collect();
@@ -197,5 +248,120 @@ mod tests {
         let result = GeneratorDag::build(vec![node]);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("doesn't exist"));
+    }
+
+    #[test]
+    fn test_upstream_of() {
+        // A → B → C (via depends_on)
+        let node_a = make_node("comp", "a", vec![], vec![], vec![]);
+        let node_b = make_node("comp", "b", vec![], vec![], vec!["a"]);
+        let node_c = make_node("comp", "c", vec![], vec![], vec!["b"]);
+
+        let dag = GeneratorDag::build(vec![node_a, node_b, node_c]).unwrap();
+
+        let idx_a = dag.index_of("comp::a").unwrap();
+        let idx_b = dag.index_of("comp::b").unwrap();
+        let idx_c = dag.index_of("comp::c").unwrap();
+
+        // A has no upstream
+        assert!(dag.upstream_of(idx_a).is_empty());
+        // B's upstream is A
+        assert_eq!(dag.upstream_of(idx_b), vec![idx_a]);
+        // C's upstream is B
+        assert_eq!(dag.upstream_of(idx_c), vec![idx_b]);
+    }
+
+    #[test]
+    fn test_downstream_of() {
+        // A → B → C
+        let node_a = make_node("comp", "a", vec![], vec![], vec![]);
+        let node_b = make_node("comp", "b", vec![], vec![], vec!["a"]);
+        let node_c = make_node("comp", "c", vec![], vec![], vec!["b"]);
+
+        let dag = GeneratorDag::build(vec![node_a, node_b, node_c]).unwrap();
+
+        let idx_a = dag.index_of("comp::a").unwrap();
+        let idx_b = dag.index_of("comp::b").unwrap();
+        let idx_c = dag.index_of("comp::c").unwrap();
+
+        // A's downstream: B and C
+        let down_a = dag.downstream_of(idx_a);
+        assert!(down_a.contains(&idx_b));
+        assert!(down_a.contains(&idx_c));
+        assert_eq!(down_a.len(), 2);
+
+        // B's downstream: only C
+        let down_b = dag.downstream_of(idx_b);
+        assert_eq!(down_b, HashSet::from([idx_c]));
+
+        // C has no downstream
+        assert!(dag.downstream_of(idx_c).is_empty());
+    }
+
+    #[test]
+    fn test_diamond_dependency() {
+        // Diamond: A → B, A → C, B → D, C → D
+        let node_a = make_node("comp", "a", vec![], vec![], vec![]);
+        let node_b = make_node("comp", "b", vec![], vec![], vec!["a"]);
+        let node_c = make_node("comp", "c", vec![], vec![], vec!["a"]);
+        let node_d = make_node("comp", "d", vec![], vec![], vec!["b", "c"]);
+
+        let dag = GeneratorDag::build(vec![node_a, node_b, node_c, node_d]).unwrap();
+        let order: Vec<&str> = dag.execution_order().map(|n| n.id.as_str()).collect();
+
+        let pos_a = order.iter().position(|&id| id == "comp::a").unwrap();
+        let pos_b = order.iter().position(|&id| id == "comp::b").unwrap();
+        let pos_c = order.iter().position(|&id| id == "comp::c").unwrap();
+        let pos_d = order.iter().position(|&id| id == "comp::d").unwrap();
+
+        assert!(pos_a < pos_b);
+        assert!(pos_a < pos_c);
+        assert!(pos_b < pos_d);
+        assert!(pos_c < pos_d);
+
+        // D has two upstreams: B and C
+        let idx_d = dag.index_of("comp::d").unwrap();
+        let upstream_d = dag.upstream_of(idx_d);
+        assert_eq!(upstream_d.len(), 2);
+
+        // A's downstream reaches B, C, D
+        let idx_a = dag.index_of("comp::a").unwrap();
+        let down_a = dag.downstream_of(idx_a);
+        assert_eq!(down_a.len(), 3);
+    }
+
+    #[test]
+    fn test_index_of() {
+        let node_a = make_node("comp", "a", vec![], vec![], vec![]);
+        let node_b = make_node("comp", "b", vec![], vec![], vec![]);
+
+        let dag = GeneratorDag::build(vec![node_a, node_b]).unwrap();
+        assert!(dag.index_of("comp::a").is_some());
+        assert!(dag.index_of("comp::b").is_some());
+        assert!(dag.index_of("comp::nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_unknown_output_indices() {
+        let mut node_a = make_node("comp", "a", vec![], vec![], vec![]);
+        node_a.decl.outputs_unknown = true;
+        let node_b = make_node("comp", "b", vec![], vec![], vec![]);
+        let mut node_c = make_node("comp", "c", vec![], vec![], vec![]);
+        node_c.decl.outputs_unknown = true;
+
+        let dag = GeneratorDag::build(vec![node_a, node_b, node_c]).unwrap();
+        let unknown = dag.unknown_output_indices();
+        assert_eq!(unknown.len(), 2);
+        // Should include indices for nodes a and c (0 and 2)
+        assert!(unknown.contains(&0));
+        assert!(unknown.contains(&2));
+    }
+
+    #[test]
+    fn test_node_accessor() {
+        let node_a = make_node("comp", "alpha", vec![], vec![], vec![]);
+        let dag = GeneratorDag::build(vec![node_a]).unwrap();
+        let n = dag.node(0);
+        assert_eq!(n.decl.name, "alpha");
     }
 }

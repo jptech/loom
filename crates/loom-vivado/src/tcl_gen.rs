@@ -12,14 +12,12 @@ pub fn generate_tcl(
     filesets: &AssembledFilesets,
     context: &BuildContext,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let target = project
-        .project
-        .target
-        .as_ref()
-        .ok_or("No [target] block in project manifest")?;
+    let effective = project
+        .effective_target()
+        .ok_or("No [target] block or platform with part in project manifest")?;
 
     let top_module = &project.project.project.top_module;
-    let part = &target.part;
+    let part = &effective.part;
 
     let bitstream_path = context.build_dir.join(format!("{}.bit", top_module));
 

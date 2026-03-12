@@ -1,0 +1,15 @@
+# 1BitSquared iCEBreaker — iCE40 UP5K SG48
+# 12 MHz oscillator
+set_io -nowarn clk 35
+
+# Active-low reset (directly active-low button BTN_N active-low active-low active-low)
+set_io -nowarn rst_n 10
+
+# GPIO — directly mapped to on-board LEDs
+set_io -nowarn gpio_io[0] 11
+set_io -nowarn gpio_io[1] 37
+set_io -nowarn gpio_io[2] 31
+set_io -nowarn gpio_io[3] 28
+
+# IRQ output
+set_io -nowarn irq 38

@@ -121,16 +121,14 @@ impl BackendPlugin for YosysNextpnrBackend {
         filesets: &AssembledFilesets,
         context: &BuildContext,
     ) -> Result<Vec<PathBuf>, LoomError> {
-        let target = project
-            .project
-            .target
-            .as_ref()
-            .ok_or_else(|| LoomError::Internal("Project has no target".to_string()))?;
+        let effective = project.effective_target().ok_or_else(|| {
+            LoomError::Internal("Project has no target or platform with part".to_string())
+        })?;
 
-        let arch = YosysArchitecture::from_part(&target.part).ok_or_else(|| {
+        let arch = YosysArchitecture::from_part(&effective.part).ok_or_else(|| {
             LoomError::Internal(format!(
                 "Could not determine yosys architecture from part '{}'",
-                target.part
+                effective.part
             ))
         })?;
 
@@ -151,14 +149,12 @@ impl BackendPlugin for YosysNextpnrBackend {
         }
 
         let project = &context.project;
-        let target = project
-            .project
-            .target
-            .as_ref()
-            .ok_or_else(|| LoomError::Internal("Project has no target".to_string()))?;
+        let effective = project.effective_target().ok_or_else(|| {
+            LoomError::Internal("Project has no target or platform with part".to_string())
+        })?;
 
-        let arch = YosysArchitecture::from_part(&target.part).ok_or_else(|| {
-            LoomError::Internal(format!("Unknown arch for part '{}'", target.part))
+        let arch = YosysArchitecture::from_part(&effective.part).ok_or_else(|| {
+            LoomError::Internal(format!("Unknown arch for part '{}'", effective.part))
         })?;
 
         let mut all_phases = Vec::new();
@@ -177,7 +173,7 @@ impl BackendPlugin for YosysNextpnrBackend {
 
         // Step 2: Run nextpnr place & route
         let json_file = context.build_dir.join("design.json");
-        let pnr_result = pnr::run_nextpnr(&arch, &json_file, &target.part, context, progress)?;
+        let pnr_result = pnr::run_nextpnr(&arch, &json_file, &effective.part, context, progress)?;
         all_logs.extend(pnr_result.log_paths.clone());
         if !pnr_result.success {
             return Ok(BuildResult {
